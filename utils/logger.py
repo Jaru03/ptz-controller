@@ -21,6 +21,11 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(f"{APP_LOGGER_NAME}.{name.lstrip('.')}")
 
 
+def get_app_log_level() -> int:
+    """Nivel efectivo (int de ``logging``) del logger de la aplicación."""
+    return logging.getLogger(APP_LOGGER_NAME).getEffectiveLevel()
+
+
 def setup_logging(
     level: str = "INFO",
     log_dir: str | Path = "logs",

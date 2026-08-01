@@ -53,6 +53,9 @@ joystick:
 gui:
     poll_interval_ms: 33
     video_fps: 15
+    # Transporte RTSP para la vista previa: 'tcp' evita la pérdida de
+    # paquetes (RTP/UDP) que provoca errores H.264 de referencias.
+    rtsp_transport: tcp
 
 logging:
     level: INFO

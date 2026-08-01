@@ -98,6 +98,7 @@ class GuiConfig:
 
     poll_interval_ms: int = 33
     video_fps: int = 15
+    rtsp_transport: str = "tcp"
 
 
 @dataclass
