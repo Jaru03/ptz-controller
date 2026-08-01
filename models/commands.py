@@ -151,10 +151,16 @@ class QuitCommand(Command):
 
 @dataclass(frozen=True)
 class PresetInfo:
-    """Información de un preset de posición."""
+    """Información de un preset de posición.
+
+    ``preset_id`` es el identificador numérico que usa la GUI (si la
+    cámara usa tokens no numéricos se genera uno estable a partir del
+    token). ``token`` es el token ONVIF real enviado a la cámara.
+    """
 
     preset_id: int
     name: str = ""
+    token: str = ""
 
 
 @dataclass(frozen=True)

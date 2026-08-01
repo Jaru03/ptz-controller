@@ -181,6 +181,7 @@ class MockPTZController(PTZController):
                 PresetInfo(
                     preset_id=preset_id,
                     name=name or f"Preset {preset_id}",
+                    token=str(preset_id),
                 )
                 for preset_id, (*_, name) in sorted(self._presets.items())
             ]
@@ -196,6 +197,7 @@ class MockPTZController(PTZController):
             PresetInfo(
                 preset_id=preset_id,
                 name=name or f"Preset {preset_id}",
+                token=str(preset_id),
             )
             for preset_id, (*_, name) in sorted(self._presets.items())
         )

@@ -8,6 +8,7 @@ en coordenadas normalizadas -1..1, igual que la interfaz ``PTZController``.
 from __future__ import annotations
 
 import os
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -79,6 +80,7 @@ class OnvifClient:
         self._device: Any = None
         self.profile_token: str | None = None
         self._stream_uri: str = ""
+        self._preset_tokens: dict[int, str] = {}
 
     # -- Ciclo de vida ----------------------------------------------------
 
@@ -113,6 +115,7 @@ class OnvifClient:
         self._device = None
         self.profile_token = None
         self._stream_uri = ""
+        self._preset_tokens = {}
 
     # -- Información del dispositivo -------------------------------------
 
@@ -253,13 +256,17 @@ class OnvifClient:
             raise CameraError(f"home falló: {exc}") from exc
 
     def goto_preset(self, preset_id: int) -> None:
-        """Desplaza la cámara a un preset (GotoPreset)."""
+        """Desplaza la cámara a un preset (GotoPreset).
+
+        Usa el token ONVIF real de la cámara (ver :meth:`get_presets`), de
+        modo que funcionan presets cuyo token no es un número.
+        """
         self._require_ptz()
         try:
             self._ptz.GotoPreset(
                 {
                     "ProfileToken": self.profile_token,
-                    "PresetToken": str(preset_id),
+                    "PresetToken": self._preset_token(preset_id),
                 }
             )
         except Exception as exc:  # noqa: BLE001
@@ -299,7 +306,7 @@ class OnvifClient:
             self._ptz.SetPreset(
                 {
                     "ProfileToken": self.profile_token,
-                    "PresetToken": str(preset_id),
+                    "PresetToken": self._preset_token(preset_id),
                     "Name": name,
                 }
             )
@@ -313,29 +320,34 @@ class OnvifClient:
             self._ptz.RemovePreset(
                 {
                     "ProfileToken": self.profile_token,
-                    "PresetToken": str(preset_id),
+                    "PresetToken": self._preset_token(preset_id),
                 }
             )
         except Exception as exc:  # noqa: BLE001
             raise CameraError(f"RemovePreset falló: {exc}") from exc
 
     def get_presets(self) -> list[PresetInfo]:
-        """Devuelve la lista de presets (GetPresets)."""
+        """Devuelve la lista de presets (GetPresets).
+
+        Los presets de la cámara pueden usar tokens no numéricos (p. ej.
+        'PresetA' o UUIDs). Se conserva el token real y se genera un
+        ``preset_id`` numérico estable solo para la interfaz.
+        """
         self._require_ptz()
         try:
             raw_presets = list(self._ptz.GetPresets({"ProfileToken": self.profile_token}))
         except Exception as exc:  # noqa: BLE001
             raise CameraError(f"GetPresets falló: {exc}") from exc
         presets: list[PresetInfo] = []
+        self._preset_tokens = {}
         for preset in raw_presets:
-            token = _getattr(preset, "token")
-            if token is None:
+            token = str(_getattr(preset, "token") or "").strip()
+            if not token:
                 continue
-            try:
-                preset_id = int(str(token))
-            except ValueError:
-                continue
-            presets.append(PresetInfo(preset_id=preset_id, name=_getattr(preset, "Name")))
+            name = str(_getattr(preset, "Name") or "").strip() or f"Preset {token}"
+            preset_id = self._preset_id_for_token(token)
+            self._preset_tokens[preset_id] = token
+            presets.append(PresetInfo(preset_id=preset_id, name=name, token=token))
         return presets
 
     def get_position(self) -> dict[str, float]:
@@ -359,6 +371,22 @@ class OnvifClient:
     def _require_ptz(self) -> None:
         if self._ptz is None or self.profile_token is None:
             raise CameraError("Cliente ONVIF no conectado o sin perfil PTZ")
+
+    def _preset_token(self, preset_id: int) -> str:
+        """Devuelve el token ONVIF real del preset (o su número como texto)."""
+        return self._preset_tokens.get(preset_id, str(preset_id))
+
+    @staticmethod
+    def _preset_id_for_token(token: str) -> int:
+        """Convierte un token ONVIF a un id numérico estable para la GUI.
+
+        Si el token es numérico se usa tal cual; si no, se deriva un
+        entero determinista (los tokens de la cámara no cambian).
+        """
+        try:
+            return int(token)
+        except ValueError:
+            return zlib.crc32(token.encode("utf-8")) & 0x7FFFFFFF
 
 
 def _getattr(obj: Any, name: str, default: Any = "") -> Any:

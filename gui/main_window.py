@@ -163,7 +163,10 @@ class MainWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
         self._camera_widget = CameraWidget()
-        self._video_widget = VideoWidget(fps=self._settings.gui.video_fps)
+        self._video_widget = VideoWidget(
+            fps=self._settings.gui.video_fps,
+            transport=self._settings.gui.rtsp_transport,
+        )
         self._controls_widget = ControlsWidget(
             self._settings.keyboard, self._settings.joystick
         )
@@ -377,9 +380,11 @@ class MainWindow(QMainWindow):
         for preset in presets or ():
             preset_id = getattr(preset, "preset_id", None)
             name = getattr(preset, "name", "") or f"Preset {preset_id}"
-            item = QListWidgetItem(f"{name}  [{preset_id}]")
+            token = getattr(preset, "token", "") or str(preset_id)
+            item = QListWidgetItem(f"{name}  [{token}]")
             item.setData(Qt.ItemDataRole.UserRole, preset_id)
             item.setData(Qt.ItemDataRole.UserRole + 1, name)
+            item.setData(Qt.ItemDataRole.UserRole + 2, token)
             self._preset_list.addItem(item)
 
     def _on_gui_error(self, message: str) -> None:
