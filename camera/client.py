@@ -176,16 +176,26 @@ class OnvifClient:
     def continuous_move(
         self, pan: float, tilt: float, zoom: float, speed: float
     ) -> None:
-        """Envía un ContinuousMove con velocidades normalizadas."""
+        """Envía un ContinuousMove con velocidades normalizadas.
+
+        Solo se incluyen los ejes con velocidad distinta de cero: algunas
+        cámaras ignoran el zoom si reciben un ``PanTilt`` vacío a la vez,
+        y el estándar ONVIF permite omitir los componentes inactivos.
+        """
         self._require_ptz()
-        velocity = {
-            "PanTilt": {"x": _clamp(pan * speed), "y": _clamp(tilt * speed)},
-            "Zoom": {"x": _clamp(zoom * speed)},
-        }
+        velocity: dict[str, Any] = {}
+        if pan or tilt:
+            velocity["PanTilt"] = {"x": _clamp(pan * speed), "y": _clamp(tilt * speed)}
+        if zoom:
+            velocity["Zoom"] = {"x": _clamp(zoom * speed)}
+        if not velocity:
+            self.stop()
+            return
         try:
             self._ptz.ContinuousMove(
                 {"ProfileToken": self.profile_token, "Velocity": velocity}
             )
+            log.debug("ContinuousMove enviado: %s", velocity)
         except Exception as exc:  # noqa: BLE001
             raise CameraError(f"ContinuousMove falló: {exc}") from exc
 
