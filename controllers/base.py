@@ -8,6 +8,7 @@ para no saturar la cámara con órdenes redundantes.
 
 from __future__ import annotations
 
+import threading
 from abc import ABC, abstractmethod
 from typing import Callable
 
@@ -35,11 +36,18 @@ def _rescale(value: float, deadzone: float) -> float:
 
 
 class MovementState:
-    """Normaliza la entrada bruta y solo publica cambios de dirección.
+    """Normaliza la entrada bruta y publica comandos de movimiento.
 
     Se usa igual desde el teclado (valores 0/±1) y desde el joystick
     (valores proporcionales), de modo que la lógica de "no enviar
     comandos innecesarios" vive en un único sitio (DRY).
+
+    Publica un ``MoveCommand`` cuando la dirección cambia y, mientras la
+    dirección se mantiene, lo **reenvía periódicamente** (cada
+    ``repeat_interval`` segundos) con un hilo auxiliar. Esto evita que
+    algunas cámaras (firmware) se queden detenidas tras recibir un único
+    ``ContinuousMove`` y no llegue otro paquete. Al volver a neutro se
+    publica ``StopCommand`` y el reenvío se detiene.
     """
 
     def __init__(
@@ -47,45 +55,83 @@ class MovementState:
         deadzone: float,
         publish: Callable[[Command], None],
         initial_speed: float = 0.5,
+        repeat_interval: float = 0.15,
     ) -> None:
         self._deadzone = max(0.0, min(0.5, float(deadzone)))
         self._publish = publish
         self._speed = _clamp01(initial_speed)
         self._raw = (0.0, 0.0, 0.0)
         self._last: MoveCommand | None = None
+        self._repeat_interval = max(0.03, float(repeat_interval))
+        self._lock = threading.RLock()
+        self._repeater: threading.Thread | None = None
+        self._stop_event = threading.Event()
 
     @property
     def speed(self) -> float:
-        return self._speed
+        with self._lock:
+            return self._speed
 
     def set_speed(self, speed: float) -> None:
         """Cambia la velocidad global y reemite si el movimiento sigue activo."""
         new_speed = _clamp01(speed)
-        if abs(new_speed - self._speed) < EPS:
-            return
-        self._speed = new_speed
+        with self._lock:
+            if abs(new_speed - self._speed) < EPS:
+                return
+            self._speed = new_speed
         self._recompute()
 
     def update(self, pan: float, tilt: float, zoom: float) -> None:
         """Recibe el vector bruto de entrada y publica si cambió algo."""
-        self._raw = (pan, tilt, zoom)
+        with self._lock:
+            self._raw = (pan, tilt, zoom)
         self._recompute()
 
     def _recompute(self) -> None:
-        pan = _rescale(self._raw[0], self._deadzone)
-        tilt = _rescale(self._raw[1], self._deadzone)
-        zoom = _rescale(self._raw[2], self._deadzone)
+        with self._lock:
+            pan = _rescale(self._raw[0], self._deadzone)
+            tilt = _rescale(self._raw[1], self._deadzone)
+            zoom = _rescale(self._raw[2], self._deadzone)
 
-        if abs(pan) < EPS and abs(tilt) < EPS and abs(zoom) < EPS:
-            if self._last is not None:
-                self._publish(StopCommand())
-                self._last = None
+            if abs(pan) < EPS and abs(tilt) < EPS and abs(zoom) < EPS:
+                if self._last is not None:
+                    self._publish(StopCommand())
+                    self._last = None
+                self._stop_repeater()
+                return
+
+            command = MoveCommand(pan=pan, tilt=tilt, zoom=zoom, speed=self._speed)
+            if self._last is None or self._different(self._last, command):
+                self._publish(command)
+                self._last = command
+            self._start_repeater()
+
+    def _start_repeater(self) -> None:
+        """Arranca el hilo de reenvío periódico si aún no está vivo."""
+        if self._repeater is not None and self._repeater.is_alive():
             return
+        self._stop_event.clear()
+        self._repeater = threading.Thread(
+            target=self._repeater_loop,
+            name="movement-repeat",
+            daemon=True,
+        )
+        self._repeater.start()
 
-        command = MoveCommand(pan=pan, tilt=tilt, zoom=zoom, speed=self._speed)
-        if self._last is None or self._different(self._last, command):
-            self._publish(command)
-            self._last = command
+    def _stop_repeater(self) -> None:
+        """Detiene el hilo de reenvío; este termina en la siguiente espera."""
+        if self._repeater is None:
+            return
+        self._stop_event.set()
+        self._repeater = None
+
+    def _repeater_loop(self) -> None:
+        """Reenvía el último ``MoveCommand`` mientras el movimiento siga activo."""
+        while not self._stop_event.wait(self._repeat_interval):
+            with self._lock:
+                last = self._last
+                if last is not None:
+                    self._publish(last)
 
     @staticmethod
     def _different(first: MoveCommand, second: MoveCommand) -> bool:

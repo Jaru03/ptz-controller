@@ -15,6 +15,10 @@ movement:
         - 0.5
         - 0.8
     deadzone: 0.08
+    # Intervalo de reenvío de ContinuousMove mientras se mantiene el
+    # movimiento (ms). Evita que algunas cámaras se queden detenidas
+    # tras recibir un único comando y no llegar otro paquete.
+    repeat_interval_ms: 150
 
 keyboard:
     backend: auto

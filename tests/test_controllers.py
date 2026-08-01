@@ -1,6 +1,7 @@
 """Tests del estado de movimiento y del controlador de teclado."""
 
 import os
+import time
 
 from config.settings import KeyboardConfig
 from controllers.base import MovementState
@@ -89,6 +90,37 @@ def test_set_speed_reemits_current_direction() -> None:
     state.set_speed(1.0)
     assert len(received) == 2
     assert received[1].speed == 1.0  # type: ignore[union-attr]
+
+
+def test_movement_state_repeats_while_held() -> None:
+    bus = EventBus()
+    received = _capture(bus)
+    state = MovementState(
+        deadzone=0.0, publish=bus.send, repeat_interval=0.02
+    )
+    state.update(1.0, 0.0, 0.0)
+    time.sleep(0.09)
+    moves = [c for c in received if isinstance(c, MoveCommand)]
+    assert len(moves) >= 2
+    state.update(0.0, 0.0, 0.0)
+    assert isinstance(received[-1], StopCommand)
+
+
+def test_movement_state_stops_repeating_after_neutral() -> None:
+    bus = EventBus()
+    received = _capture(bus)
+    state = MovementState(
+        deadzone=0.0, publish=bus.send, repeat_interval=0.02
+    )
+    state.update(1.0, 0.0, 0.0)
+    time.sleep(0.06)
+    assert sum(isinstance(c, MoveCommand) for c in received) >= 2
+    state.update(0.0, 0.0, 0.0)
+    time.sleep(0.06)
+    moves_after_stop = sum(isinstance(c, MoveCommand) for c in received)
+    assert isinstance(received[-1], StopCommand)
+    time.sleep(0.06)
+    assert sum(isinstance(c, MoveCommand) for c in received) == moves_after_stop
 
 
 def test_keyboard_wasd_movement() -> None:

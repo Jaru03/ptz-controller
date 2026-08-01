@@ -40,6 +40,7 @@ class MovementConfig:
     speed: float = 0.5
     speeds: list[float] = field(default_factory=lambda: [0.2, 0.5, 0.8])
     deadzone: float = 0.08
+    repeat_interval_ms: int = 150
 
 
 @dataclass

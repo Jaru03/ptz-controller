@@ -112,6 +112,7 @@ def main(argv: list[str] | None = None) -> int:
         deadzone=settings.movement.deadzone,
         publish=bus.send,
         initial_speed=settings.movement.speed,
+        repeat_interval=settings.movement.repeat_interval_ms / 1000.0,
     )
 
     # -- Entrada ----------------------------------------------------------
