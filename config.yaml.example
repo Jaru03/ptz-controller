@@ -1,0 +1,59 @@
+# Configuración del controlador de cámaras PTZ ONVIF.
+# Copie este archivo a config.yaml y ajuste los valores.
+camera:
+    ip: 192.168.1.100
+    port: 80
+    username: admin
+    password: ""
+    rtsp_url: ""
+    mock: true
+
+movement:
+    speed: 0.5
+    speeds:
+        - 0.2
+        - 0.5
+        - 0.8
+    deadzone: 0.08
+
+keyboard:
+    backend: auto
+    # auto: pynput global, con fallback a la ventana Qt
+    # pynput: solo teclado global (X11 / grupo input en Linux)
+    # qt: solo eventos de la ventana (fiable en Wayland y Windows)
+    up: w
+    down: s
+    left: a
+    right: d
+    zoom_in: e
+    zoom_out: q
+    # Tecla -> id de preset (escenas). Pulsar la tecla detiene el
+    # movimiento y desplaza la cámara a esa escena.
+    preset_hotkeys:
+        "1": 1
+        "2": 2
+        "3": 3
+    stop: space
+    quit: esc
+
+joystick:
+    poll_rate: 30
+    deadzone: 0.08
+    pan_axis: 0
+    tilt_axis: 1
+    invert_tilt: true
+    zoom_out_axis: 4
+    zoom_in_axis: 5
+    speed_down_button: 5
+    speed_up_button: 4
+    home_button: 12
+    preset_buttons: [0, 1, 2, 3]
+    device_overrides: {}
+
+gui:
+    poll_interval_ms: 33
+    video_fps: 15
+
+logging:
+    level: INFO
+    directory: logs

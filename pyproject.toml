@@ -1,0 +1,35 @@
+[project]
+name = "ptz-controller"
+version = "0.1.0"
+description = "Controlador universal de cámaras PTZ ONVIF (teclado, gamepad, interfaz PySide6)"
+readme = "README.md"
+authors = [
+    { name = "Jose Rico", email = "josearudeveloper@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "onvif-zeep>=0.2.12",
+    "pygame>=2.6",
+    "pynput>=1.8",
+    "PySide6>=6.8",
+    "PyYAML>=6.0",
+    "opencv-python>=4.10",
+]
+
+[project.scripts]
+ptz-controller = "main:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.0,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
