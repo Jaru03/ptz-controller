@@ -355,6 +355,8 @@ del de PyInstaller a propósito (`packaging/rpm/`). Requisitos:
   tarball en `dist/rpm/SOURCES` y deja el RPM en
   `dist/rpm/RPMS/x86_64/`. No hay etapa de compilación: el RPM debe
   generarse en la misma distro/arquitectura que el binario.
+- En CI (`build.yml`, runner Linux) se buildea igualmente,
+  incluyéndose dentro del `.tar.gz` de Linux de la release.
 
 ### Pendiente de confirmar en hardware
 

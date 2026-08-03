@@ -64,6 +64,16 @@ jobs:
           echo "El ejecutable arrancó y creó su configuración."
         shell: bash
 
+      # El RPM para Fedora se genera aquí (misma arquitectura x86_64 que
+      # el binario). El resultado viaja dentro del .tar.gz de Linux.
+      - name: Build RPM (Fedora)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm desktop-file-utils
+          uv run --group build python packaging/build_rpm.py
+        shell: bash
+
       - name: Smoke test (Windows)
         if: runner.os == 'Windows'
         run: |
@@ -89,6 +99,7 @@ jobs:
           mkdir -p "package/${{ matrix.artifact }}"
           cp dist/ptz-controller packaging/install.sh packaging/icon.png \
             "package/${{ matrix.artifact }}/"
+          cp dist/rpm/RPMS/x86_64/*.rpm "package/${{ matrix.artifact }}/"
           chmod +x "package/${{ matrix.artifact }}/ptz-controller" \
             "package/${{ matrix.artifact }}/install.sh"
           tar -czf "${{ matrix.artifact }}.tar.gz" -C package "${{ matrix.artifact }}"
@@ -149,6 +160,13 @@ jobs:
             **Windows**: descomprima el `.zip` y ejecute
             ```powershell
             powershell -ExecutionPolicy Bypass -File install.ps1
+            ```
+
+            **Fedora (RPM)**: dentro del `.tar.gz` de Linux va también el
+            paquete `.rpm`. Instálelo con:
+            ```bash
+            tar -xzf ptz-controller-linux-x86_64.tar.gz
+            sudo dnf install ptz-controller-*.rpm
             ```
 
             La configuración se crea al primer arranque en
