@@ -57,19 +57,19 @@ class PTZController(ABC):
         """Vuelve a la posición de inicio."""
 
     @abstractmethod
-    def goto_preset(self, preset_id: int) -> None:
-        """Desplaza la cámara hasta un preset guardado."""
+    def goto_preset(self, token: str) -> None:
+        """Desplaza la cámara hasta el preset con ese token."""
 
     @abstractmethod
-    def set_preset(self, preset_id: int, name: str = "") -> None:
-        """Guarda la posición actual con el identificador y nombre dados."""
+    def set_preset(self, token: str = "", name: str = "") -> None:
+        """Guarda la posición actual (token vacío: crea uno nuevo)."""
 
     @abstractmethod
-    def rename_preset(self, preset_id: int, name: str) -> None:
+    def rename_preset(self, token: str, name: str) -> None:
         """Cambia el nombre de un preset existente."""
 
     @abstractmethod
-    def remove_preset(self, preset_id: int) -> None:
+    def remove_preset(self, token: str) -> None:
         """Elimina un preset."""
 
     @abstractmethod
@@ -90,12 +90,27 @@ class PTZController(ABC):
 
 
 class OnvifPTZController(PTZController):
-    """Implementación de ``PTZController`` sobre el protocolo ONVIF."""
+    """Implementación de ``PTZController`` sobre el protocolo ONVIF.
 
-    def __init__(self, ip: str, port: int, username: str, password: str) -> None:
-        self._client = OnvifClient(ip, port, username, password)
+    ``zoom_mode`` ('auto', 'step' o 'continuous') decide cómo se traduce
+    el eje de zoom; ver :class:`config.settings.MovementConfig`.
+    """
+
+    def __init__(
+        self,
+        ip: str,
+        port: int,
+        username: str,
+        password: str,
+        zoom_mode: str = "auto",
+        zoom_step: float = 0.06,
+        timeout: int = 5,
+    ) -> None:
+        self._client = OnvifClient(ip, port, username, password, timeout=timeout)
         self._device_name = ""
         self._status = PTZStatus(connected=False, ip=ip)
+        self._zoom_mode = zoom_mode if zoom_mode in ("auto", "step", "continuous") else "auto"
+        self._zoom_step = max(0.01, min(1.0, float(zoom_step)))
 
     @property
     def connected(self) -> bool:
@@ -137,9 +152,43 @@ class OnvifPTZController(PTZController):
             log.warning("move() ignorado: cámara no conectada")
             return
         try:
-            self._client.continuous_move(pan, tilt, zoom, speed)
+            if zoom and self._zoom_mode != "continuous":
+                self._move_with_zoom_steps(pan, tilt, zoom, speed)
+            else:
+                self._client.continuous_move(pan, tilt, zoom, speed)
         except CameraError as exc:
             log.error("Error en ContinuousMove: %s", exc)
+
+    def _move_with_zoom_steps(
+        self, pan: float, tilt: float, zoom: float, speed: float
+    ) -> None:
+        """Mueve el pan/tilt en continuo y el zoom a saltos discretos.
+
+        Cada llamada avanza el zoom ``zoom_step`` (escalado por la
+        velocidad), lo que permite pararlo en posiciones intermedias
+        aunque el firmware ignore el ``Stop`` del eje de zoom. En modo
+        'auto', si la cámara rechaza el ``RelativeMove`` se pasa
+        definitivamente a zoom continuo.
+
+        Si no hay pan/tilt no se envía ningún ``ContinuousMove``: hacerlo
+        con todos los ejes a cero se traduce en un ``Stop`` que llegaría
+        entre pasos de zoom y abortaría el desplazamiento anterior.
+        """
+        if pan or tilt:
+            self._client.continuous_move(pan, tilt, 0.0, speed)
+        else:
+            self._client.stop_inactive_axes(pan_tilt=False, zoom=False)
+        step = self._zoom_step * max(0.1, speed)
+        try:
+            self._client.relative_move(0.0, 0.0, zoom * step)
+        except CameraError as exc:
+            if self._zoom_mode != "auto":
+                raise
+            log.warning(
+                "RelativeMove de zoom no soportado (%s); usando zoom continuo", exc
+            )
+            self._zoom_mode = "continuous"
+            self._client.continuous_move(pan, tilt, zoom, speed)
 
     def stop(self) -> None:
         if not self.connected:
@@ -157,43 +206,45 @@ class OnvifPTZController(PTZController):
         except CameraError as exc:
             log.error("Error en home: %s", exc)
 
-    def goto_preset(self, preset_id: int) -> None:
+    def goto_preset(self, token: str) -> None:
         if not self.connected:
             return
         try:
-            self._client.goto_preset(preset_id)
-            log.info("GotoPreset %s ejecutado", preset_id)
+            self._client.goto_preset(token)
+            log.info("GotoPreset %s ejecutado", token)
         except CameraError as exc:
-            log.error("Error en GotoPreset %s: %s", preset_id, exc)
+            log.error("Error en GotoPreset %s: %s", token, exc)
 
-    def set_preset(self, preset_id: int, name: str = "") -> None:
+    def set_preset(self, token: str = "", name: str = "") -> None:
         if not self.connected:
             return
         try:
-            self._client.set_preset(preset_id, name)
+            self._client.set_preset(token, name)
             log.info(
-                "SetPreset %s ejecutado%s", preset_id, f" (nombre: {name})" if name else ""
+                "SetPreset %s ejecutado%s",
+                token or "(nuevo)",
+                f" (nombre: {name})" if name else "",
             )
         except CameraError as exc:
-            log.error("Error en SetPreset %s: %s", preset_id, exc)
+            log.error("Error en SetPreset %s: %s", token, exc)
 
-    def rename_preset(self, preset_id: int, name: str) -> None:
+    def rename_preset(self, token: str, name: str) -> None:
         if not self.connected:
             return
         try:
-            self._client.rename_preset(preset_id, name)
-            log.info("Preset %s renombrado a '%s'", preset_id, name)
+            self._client.rename_preset(token, name)
+            log.info("Preset %s renombrado a '%s'", token, name)
         except CameraError as exc:
-            log.error("Error al renombrar preset %s: %s", preset_id, exc)
+            log.error("Error al renombrar preset %s: %s", token, exc)
 
-    def remove_preset(self, preset_id: int) -> None:
+    def remove_preset(self, token: str) -> None:
         if not self.connected:
             return
         try:
-            self._client.remove_preset(preset_id)
-            log.info("RemovePreset %s ejecutado", preset_id)
+            self._client.remove_preset(token)
+            log.info("RemovePreset %s ejecutado", token)
         except CameraError as exc:
-            log.error("Error en RemovePreset %s: %s", preset_id, exc)
+            log.error("Error en RemovePreset %s: %s", token, exc)
 
     def list_presets(self) -> list[PresetInfo]:
         if not self.connected:

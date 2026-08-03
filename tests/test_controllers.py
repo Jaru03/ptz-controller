@@ -3,18 +3,23 @@
 import os
 import time
 
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 from config.settings import KeyboardConfig
 from controllers.base import MovementState
 from controllers.keyboard_controller import (
     KeyboardController,
     QtKeyboardController,
     create_keyboard_controller,
+    hotkey_for_preset,
+    key_aliases,
     qt_key_name,
 )
 from core.event_bus import EventBus
 from models.commands import (
     GotoPresetCommand,
     MoveCommand,
+    PresetInfo,
     QuitCommand,
     SetSpeedCommand,
     StopCommand,
@@ -155,25 +160,69 @@ def test_keyboard_zoom_and_hold_still() -> None:
     assert received[0].zoom == 1.0  # type: ignore[union-attr]
 
 
-def test_keyboard_preset_hotkeys_goto_scenes() -> None:
-    bus = EventBus()
-    received = _capture(bus)
+def _controller_with_presets(bus: EventBus, tokens: list[str]):
+    """Controlador de teclado con una lista de presets ya publicada."""
     config = KeyboardConfig()
     state = MovementState(deadzone=0.0, publish=bus.send)
     controller = KeyboardController(config, state, bus)
-    controller.on_key_down("1")
-    controller.on_key_down("3")
+    bus.publish("ptz.presets", [PresetInfo(token=token) for token in tokens])
+    return config, controller
+
+
+def test_keyboard_preset_keys_resolve_by_position() -> None:
+    bus = EventBus()
+    received = _capture(bus)
+    _controller_with_presets(bus, ["PresetA", "12", "zona-norte"])[1].on_key_down("1")
     gotos = [c for c in received if isinstance(c, GotoPresetCommand)]
-    assert [c.preset_id for c in gotos] == [1, 3]
+    assert [c.token for c in gotos] == ["PresetA"]
+
+
+def test_keyboard_preset_keys_reach_beyond_the_first_three() -> None:
+    bus = EventBus()
+    received = _capture(bus)
+    _, controller = _controller_with_presets(
+        bus, [f"p{index}" for index in range(1, 11)]
+    )
+    for key in ("4", "7", "0"):
+        controller.on_key_down(key)
+        controller.on_key_up(key)
+    gotos = [c for c in received if isinstance(c, GotoPresetCommand)]
+    assert [c.token for c in gotos] == ["p4", "p7", "p10"]
+
+
+def test_keyboard_numpad_falls_back_to_its_digit() -> None:
+    bus = EventBus()
+    received = _capture(bus)
+    _, controller = _controller_with_presets(bus, ["PresetA", "PresetB"])
+    controller.on_key_down("kp_2")
+    gotos = [c for c in received if isinstance(c, GotoPresetCommand)]
+    assert [c.token for c in gotos] == ["PresetB"]
+
+
+def test_keyboard_explicit_hotkey_wins_over_position() -> None:
+    bus = EventBus()
+    received = _capture(bus)
+    config, controller = _controller_with_presets(bus, ["PresetA", "PresetB"])
+    config.preset_hotkeys = {"kp_1": "zona-norte", "f1": "PresetB"}
+    controller.on_key_down("kp_1")
+    controller.on_key_down("f1")
+    gotos = [c for c in received if isinstance(c, GotoPresetCommand)]
+    assert [c.token for c in gotos] == ["zona-norte", "PresetB"]
+
+
+def test_keyboard_preset_key_without_preset_does_nothing() -> None:
+    bus = EventBus()
+    received = _capture(bus)
+    _, controller = _controller_with_presets(bus, ["PresetA"])
+    controller.on_key_down("5")
+    assert not any(isinstance(c, GotoPresetCommand) for c in received)
     assert not any(isinstance(c, SetSpeedCommand) for c in received)
 
 
 def test_keyboard_preset_hotkey_stops_movement() -> None:
     bus = EventBus()
     received = _capture(bus)
-    config = KeyboardConfig()
-    state = MovementState(deadzone=0.0, publish=bus.send)
-    controller = KeyboardController(config, state, bus)
+    _, controller = _controller_with_presets(bus, ["PresetA"])
     controller.on_key_down("w")
     controller.on_key_down("1")
     assert isinstance(received[-1], GotoPresetCommand)
@@ -200,26 +249,50 @@ def test_keyboard_space_publishes_stop() -> None:
     assert isinstance(received[-1], StopCommand)
 
 
+def _key_event(key, text: str = "", keypad: bool = False):
+    """Construye un QKeyEvent real (los simulados ocultan modificadores)."""
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+
+    modifiers = (
+        Qt.KeyboardModifier.KeypadModifier
+        if keypad
+        else Qt.KeyboardModifier.NoModifier
+    )
+    return QKeyEvent(QEvent.Type.KeyPress, key, modifiers, text)
+
+
 def test_qt_key_name_conversion() -> None:
-    # No se construye un QKeyEvent real aquí: probamos la lógica del mapeo
-    # con un objeto que simule la interfaz mínima.
-    class FakeEvent:
-        def __init__(self, text, key):
-            self._text = text
-            self._key = key
-
-        def text(self):
-            return self._text
-
-        def key(self):
-            return self._key
-
     from PySide6.QtCore import Qt
 
-    assert qt_key_name(FakeEvent("W", 0)) == "w"
-    assert qt_key_name(FakeEvent(" ", Qt.Key_Space)) == "space"
-    assert qt_key_name(FakeEvent("", Qt.Key_Escape)) == "esc"
-    assert qt_key_name(FakeEvent("", 123456)) == ""
+    assert qt_key_name(_key_event(Qt.Key_W, "W")) == "w"
+    assert qt_key_name(_key_event(Qt.Key_Space, " ")) == "space"
+    assert qt_key_name(_key_event(Qt.Key_Escape)) == "esc"
+    assert qt_key_name(_key_event(Qt.Key_F5)) == "f5"
+    assert qt_key_name(_key_event(Qt.Key_MediaPlay)) == ""
+
+
+def test_qt_key_name_numpad_with_numlock() -> None:
+    from PySide6.QtCore import Qt
+
+    # Con Bloq Num el pad escribe el mismo texto que la fila de dígitos.
+    assert qt_key_name(_key_event(Qt.Key_1, "1", keypad=True)) == "kp_1"
+    assert qt_key_name(_key_event(Qt.Key_1, "1")) == "1"
+
+
+def test_qt_key_name_numpad_without_numlock() -> None:
+    from PySide6.QtCore import Qt
+
+    # Sin Bloq Num el pad emite teclas de navegación y ningún texto.
+    assert qt_key_name(_key_event(Qt.Key_End, "", keypad=True)) == "kp_1"
+    assert qt_key_name(_key_event(Qt.Key_Down, "", keypad=True)) == "kp_2"
+    assert qt_key_name(_key_event(Qt.Key_Down, "")) == "down"
+
+
+def test_key_aliases_fall_back_from_numpad_to_digit() -> None:
+    assert key_aliases("kp_3") == ("kp_3", "3")
+    assert key_aliases("kp_enter") == ("kp_enter",)
+    assert key_aliases("w") == ("w",)
 
 
 def test_preset_command_not_published_by_keyboard() -> None:
@@ -230,6 +303,16 @@ def test_preset_command_not_published_by_keyboard() -> None:
     controller = KeyboardController(config, state, bus)
     controller.on_key_down("q")
     assert not any(isinstance(c, GotoPresetCommand) for c in received)
+
+
+def test_hotkey_for_preset_uses_position_and_explicit_map() -> None:
+    config = KeyboardConfig()
+    assert hotkey_for_preset(config, 0, "PresetA") == "1"
+    assert hotkey_for_preset(config, 9, "PresetJ") == "0"
+    assert hotkey_for_preset(config, 12, "PresetM") == ""
+
+    config.preset_hotkeys = {"f1": "PresetM"}
+    assert hotkey_for_preset(config, 12, "PresetM") == "f1"
 
 
 def test_create_keyboard_controller_prefers_qt_on_wayland(

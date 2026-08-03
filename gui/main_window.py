@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import threading
 from types import SimpleNamespace
+from typing import Callable
 
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QKeyEvent
@@ -44,7 +45,11 @@ from PySide6.QtWidgets import (
 
 from camera.discovery import DiscoveredDevice, discover_devices
 from config.settings import Settings
-from controllers.keyboard_controller import KeyboardController, qt_key_name
+from controllers.keyboard_controller import (
+    KeyboardController,
+    hotkey_for_preset,
+    qt_key_name,
+)
 from core.event_bus import EventBus
 from core.ref import Ref
 from gui.camera_widget import CameraWidget
@@ -92,6 +97,7 @@ class QtEventBridge(QObject):
     joystick = Signal(dict)
     speed = Signal(object)
     presets = Signal(object)
+    stream = Signal(str)
     discovery = Signal(object)
     discovery_done = Signal()
     error = Signal(str)
@@ -105,6 +111,7 @@ class QtEventBridge(QObject):
         bus.subscribe("input.joystick", self.joystick.emit)
         bus.subscribe("command.setSpeed", self.speed.emit)
         bus.subscribe("ptz.presets", self.presets.emit)
+        bus.subscribe("ptz.stream", self.stream.emit)
         bus.subscribe("gui.discovery", self.discovery.emit)
         bus.subscribe("gui.error", self.error.emit)
         bus.subscribe("command.quit", self.quit_request.emit)
@@ -121,6 +128,7 @@ class MainWindow(QMainWindow):
         keyboard_controller: KeyboardController | None,
         config_path: str,
         poll_interval_ms: int,
+        poll_status: Callable[[], None] | None = None,
     ) -> None:
         super().__init__()
         self._ref = controller_ref
@@ -130,7 +138,9 @@ class MainWindow(QMainWindow):
         self._config_path = config_path
         self._quitting = False
         self._updating_speed = False
+        self._connected = False
         self._video_url = ""
+        self._poll_status_job = poll_status
 
         self._bridge = QtEventBridge(bus)
 
@@ -151,7 +161,7 @@ class MainWindow(QMainWindow):
         self._poll_timer.start()
 
         self._bus.publish("ptz.status", self._ref.value.get_status())
-        self._publish_presets()
+        self._bus.publish("ptz.presets", self._ref.value.list_presets())
 
     # -- Construcción de la interfaz --------------------------------------
 
@@ -317,6 +327,7 @@ class MainWindow(QMainWindow):
         bridge.joystick.connect(self._on_joystick_state)
         bridge.speed.connect(self._on_speed_command)
         bridge.presets.connect(self._on_presets)
+        bridge.stream.connect(self._on_stream_uri)
         bridge.discovery.connect(self._on_discovery)
         bridge.discovery_done.connect(self._on_discovery_done)
         bridge.error.connect(self._on_gui_error)
@@ -326,10 +337,20 @@ class MainWindow(QMainWindow):
     # -- Slots de estado --------------------------------------------------
 
     def _poll_status(self) -> None:
+        """Pide una instantánea de estado.
+
+        Con cámara real la consulta la hace el worker (es una petición de
+        red); el modo simulado la resuelve en memoria y puede publicarse
+        directamente.
+        """
+        if self._poll_status_job is not None:
+            self._poll_status_job()
+            return
         self._bus.publish("ptz.status", self._ref.value.get_status())
 
     def _on_status(self, status: PTZStatus) -> None:
         self._camera_widget.update_status(status)
+        self._connected = status.connected
 
         if status.connected:
             self._conn_label.setText(
@@ -339,7 +360,6 @@ class MainWindow(QMainWindow):
             self._connect_button.setText("Desconectar")
             self._device_label.setText(status.device_name)
             self._ip_label.setText(status.ip)
-            self._start_video_if_available()
         else:
             self._conn_label.setText(
                 f'<span style="color:{_DISCONNECTED_COLOR}">● Desconectada</span>'
@@ -377,14 +397,16 @@ class MainWindow(QMainWindow):
 
     def _on_presets(self, presets: object) -> None:
         self._preset_list.clear()
-        for preset in presets or ():
-            preset_id = getattr(preset, "preset_id", None)
-            name = getattr(preset, "name", "") or f"Preset {preset_id}"
-            token = getattr(preset, "token", "") or str(preset_id)
-            item = QListWidgetItem(f"{name}  [{token}]")
-            item.setData(Qt.ItemDataRole.UserRole, preset_id)
+        for index, preset in enumerate(presets or ()):
+            token = str(getattr(preset, "token", "") or "")
+            name = getattr(preset, "name", "") or f"Preset {token}"
+            hotkey = hotkey_for_preset(self._settings.keyboard, index, token)
+            label = f"{name}  [{token}]"
+            if hotkey:
+                label += f"  ·  tecla {hotkey.upper()}"
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, token)
             item.setData(Qt.ItemDataRole.UserRole + 1, name)
-            item.setData(Qt.ItemDataRole.UserRole + 2, token)
             self._preset_list.addItem(item)
 
     def _on_gui_error(self, message: str) -> None:
@@ -393,8 +415,7 @@ class MainWindow(QMainWindow):
     # -- Conexión ---------------------------------------------------------
 
     def _toggle_connect(self) -> None:
-        status = self._ref.value.get_status()
-        if status.connected:
+        if self._connected:
             self._bus.send(DisconnectCommand())
         else:
             self._apply_connection_form_to_settings()
@@ -408,75 +429,76 @@ class MainWindow(QMainWindow):
         camera.password = self._pass_field.text()
         camera.mock = self._mock_check.isChecked()
 
-    def _start_video_if_available(self) -> None:
-        if self._video_url:
+    def _on_stream_uri(self, url: str) -> None:
+        """Arranca o detiene la vista previa según la URL publicada."""
+        url = url.strip()
+        if url == self._video_url:
             return
-        configured = self._settings.camera.rtsp_url.strip()
-        url = configured or self._ref.value.stream_uri()
+        self._video_url = url
         if url:
-            self._video_url = url
             self._video_widget.start(url)
+        else:
+            self._video_widget.show_placeholder(
+                "Sin señal\n(conéctese una cámara real para ver el stream RTSP)"
+            )
 
     # -- Presets ----------------------------------------------------------
 
-    def _selected_preset_id(self) -> int | None:
+    def _selected_preset_token(self) -> str | None:
         item = self._preset_list.currentItem()
         if item is None:
             return None
-        return int(item.data(Qt.ItemDataRole.UserRole))
+        return str(item.data(Qt.ItemDataRole.UserRole))
 
     def _preset_go_action(self) -> None:
-        preset_id = self._selected_preset_id()
-        if preset_id is None:
+        token = self._selected_preset_token()
+        if token is None:
             return
-        self._bus.send(GotoPresetCommand(preset_id))
+        self._bus.send(GotoPresetCommand(token))
 
     def _preset_save_action(self) -> None:
-        next_id = 1
-        if self._preset_list.count():
-            ids = [
-                int(self._preset_list.item(i).data(Qt.ItemDataRole.UserRole))
-                for i in range(self._preset_list.count())
-            ]
-            next_id = max(ids) + 1
-        result = self._prompt_preset(f"Guardar preset {next_id}", "", next_id)
+        result = self._prompt_preset("Guardar preset", "", "")
         if result is None:
             return
-        preset_id, name = result
-        self._bus.send(SetPresetCommand(preset_id, name))
-        self._publish_presets()
+        token, name = result
+        self._bus.send(SetPresetCommand(token, name))
 
     def _preset_rename_action(self) -> None:
         item = self._preset_list.currentItem()
         if item is None:
             return
-        preset_id = int(item.data(Qt.ItemDataRole.UserRole))
+        token = str(item.data(Qt.ItemDataRole.UserRole))
         current_name = str(item.data(Qt.ItemDataRole.UserRole + 1))
-        result = self._prompt_preset(f"Renombrar preset {preset_id}", current_name, preset_id)
+        result = self._prompt_preset(f"Renombrar preset {token}", current_name, token)
         if result is None:
             return
-        new_id, new_name = result
-        if new_id != preset_id:
-            self._bus.send(RemovePresetCommand(preset_id))
-            self._bus.send(SetPresetCommand(new_id, new_name))
+        new_token, new_name = result
+        if new_token != token:
+            self._bus.send(RemovePresetCommand(token))
+            self._bus.send(SetPresetCommand(new_token, new_name))
         else:
-            self._bus.send(RenamePresetCommand(preset_id, new_name))
-        self._publish_presets()
+            self._bus.send(RenamePresetCommand(token, new_name))
 
-    def _prompt_preset(self, title: str, default_name: str, default_id: int) -> tuple[int, str] | None:
-        """Pide nombre y número de preset; devuelve (id, nombre) o None."""
+    def _prompt_preset(
+        self, title: str, default_name: str, default_token: str
+    ) -> tuple[str, str] | None:
+        """Pide nombre y token de preset; devuelve (token, nombre) o None.
+
+        El token es el identificador que usa la cámara y no tiene por qué
+        ser un número: dejarlo vacío al guardar hace que sea la propia
+        cámara quien asigne uno.
+        """
         dialog = QDialog(self)
         dialog.setWindowTitle(title)
         form = QFormLayout(dialog)
 
         name_field = QLineEdit(default_name)
         name_field.setPlaceholderText("Nombre del preset (ej. Entrada principal)")
-        id_field = QSpinBox()
-        id_field.setRange(1, 999)
-        id_field.setValue(default_id)
+        token_field = QLineEdit(default_token)
+        token_field.setPlaceholderText("Vacío: lo asigna la cámara")
 
         form.addRow("Nombre:", name_field)
-        form.addRow("Número:", id_field)
+        form.addRow("Token:", token_field)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -489,20 +511,13 @@ class MainWindow(QMainWindow):
         name_field.setFocus()
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return None
-        name = name_field.text().strip()
-        if not name:
-            name = f"Preset {id_field.value()}"
-        return id_field.value(), name
+        return token_field.text().strip(), name_field.text().strip()
 
     def _preset_delete_action(self) -> None:
-        preset_id = self._selected_preset_id()
-        if preset_id is None:
+        token = self._selected_preset_token()
+        if token is None:
             return
-        self._bus.send(RemovePresetCommand(preset_id))
-        self._publish_presets()
-
-    def _publish_presets(self) -> None:
-        self._bus.publish("ptz.presets", self._ref.value.list_presets())
+        self._bus.send(RemovePresetCommand(token))
 
     # -- Velocidad --------------------------------------------------------
 

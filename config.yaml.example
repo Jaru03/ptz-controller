@@ -1,5 +1,12 @@
 # Configuración del controlador de cámaras PTZ ONVIF.
-# Copie este archivo a config.yaml y ajuste los valores.
+#
+# Ajuste al menos la IP, el usuario y la contraseña de su cámara, y ponga
+# 'mock: false' para usarla de verdad.
+#
+# Desde el código fuente: copie este archivo a config.yaml en la raíz del
+# proyecto. El ejecutable instalado ya lo copia solo la primera vez, a
+# ~/.config/ptz-controller/config.yaml (Linux) o
+# %APPDATA%\ptz-controller\config.yaml (Windows).
 camera:
     ip: 192.168.1.100
     port: 80
@@ -19,6 +26,15 @@ movement:
     # movimiento (ms). Evita que algunas cámaras se queden detenidas
     # tras recibir un único comando y no llegar otro paquete.
     repeat_interval_ms: 150
+    # Cómo se controla el zoom (E/Q):
+    #   step:       RelativeMove de zoom_step por repetición. El zoom
+    #               avanza a saltos y para en posiciones intermedias
+    #               aunque la cámara ignore el Stop del eje de zoom.
+    #   continuous: ContinuousMove + Stop, igual que el pan/tilt.
+    #   auto:       intenta 'step' y cae a 'continuous' si la cámara
+    #               rechaza el RelativeMove.
+    zoom_mode: auto
+    zoom_step: 0.06
 
 keyboard:
     backend: auto
@@ -31,12 +47,18 @@ keyboard:
     right: d
     zoom_in: e
     zoom_out: q
-    # Tecla -> id de preset (escenas). Pulsar la tecla detiene el
-    # movimiento y desplaza la cámara a esa escena.
-    preset_hotkeys:
-        "1": 1
-        "2": 2
-        "3": 3
+    # Teclas de escena, asignadas POR POSICIÓN a los presets que
+    # devuelve la cámara: la 1ª tecla va al 1er preset, etc. Funciona
+    # con cualquier token ONVIF (numérico o no) y sin tocar nada al
+    # añadir escenas. Las teclas del pad numérico ('kp_1'...'kp_0')
+    # caen a su dígito si no tienen asignación propia.
+    preset_keys: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
+    # Atajos fijos tecla -> token ONVIF concreto (tienen prioridad).
+    # Útil para escenas con token no numérico:
+    #   preset_hotkeys:
+    #       f1: PresetEntrada
+    #       kp_5: "12"
+    preset_hotkeys: {}
     stop: space
     quit: esc
 
@@ -51,6 +73,7 @@ joystick:
     speed_down_button: 5
     speed_up_button: 4
     home_button: 12
+    # Botones de escena, también por posición (1er botón -> 1er preset).
     preset_buttons: [0, 1, 2, 3]
     device_overrides: {}
 

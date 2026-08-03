@@ -40,6 +40,8 @@ def _key_label(name: str) -> str:
     }
     if name in aliases:
         return aliases[name]
+    if name.startswith("kp_"):
+        return f"Num {name[3:].upper()}"
     return name.upper()
 
 
@@ -64,7 +66,9 @@ class ControlsWidget(QWidget):
 
         note = QLabel(
             "Los controles pueden personalizarse en config.yaml "
-            "(secciones keyboard y joystick)."
+            "(secciones keyboard y joystick). Las teclas de preset se "
+            "asignan por posición a las escenas de la cámara; el pad "
+            "numérico funciona igual que la fila de dígitos."
         )
         note.setWordWrap(True)
         note.setStyleSheet(_STYLE_INFO)
@@ -92,11 +96,20 @@ class ControlsWidget(QWidget):
             form,
             "Escenas (presets)",
             " · ".join(
-                f"{_key_label(key)} → preset {preset_id}"
-                for key, preset_id in config.preset_hotkeys.items()
+                f"{_key_label(key)} → preset {position}"
+                for position, key in enumerate(config.preset_keys, start=1)
             )
             or "—",
         )
+        if config.preset_hotkeys:
+            self._add_row(
+                form,
+                "Atajos fijos",
+                " · ".join(
+                    f"{_key_label(key)} → token {token}"
+                    for key, token in config.preset_hotkeys.items()
+                ),
+            )
         self._add_row(form, "Detener", _key_label(config.stop))
         self._add_row(form, "Salir", _key_label(config.quit))
         return group

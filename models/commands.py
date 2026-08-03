@@ -101,16 +101,16 @@ class SetSpeedCommand(Command):
 
 @dataclass(frozen=True)
 class GotoPresetCommand(Command):
-    """Ordena desplazarse a un preset guardado."""
+    """Ordena desplazarse a un preset guardado (token ONVIF)."""
 
-    preset_id: int = 0
+    token: str = ""
 
 
 @dataclass(frozen=True)
 class SetPresetCommand(Command):
     """Guarda la posición actual como preset con un nombre opcional."""
 
-    preset_id: int = 0
+    token: str = ""
     name: str = ""
 
 
@@ -118,7 +118,7 @@ class SetPresetCommand(Command):
 class RenamePresetCommand(Command):
     """Cambia el nombre de un preset existente."""
 
-    preset_id: int = 0
+    token: str = ""
     name: str = ""
 
 
@@ -126,7 +126,7 @@ class RenamePresetCommand(Command):
 class RemovePresetCommand(Command):
     """Elimina un preset."""
 
-    preset_id: int = 0
+    token: str = ""
 
 
 @dataclass(frozen=True)
@@ -153,14 +153,13 @@ class QuitCommand(Command):
 class PresetInfo:
     """Información de un preset de posición.
 
-    ``preset_id`` es el identificador numérico que usa la GUI (si la
-    cámara usa tokens no numéricos se genera uno estable a partir del
-    token). ``token`` es el token ONVIF real enviado a la cámara.
+    ``token`` es el identificador real del preset en la cámara y es
+    opaco a propósito: ONVIF permite tokens no numéricos ('PresetA',
+    UUIDs...), así que ninguna capa debe asumir que es un número.
     """
 
-    preset_id: int
+    token: str
     name: str = ""
-    token: str = ""
 
 
 @dataclass(frozen=True)

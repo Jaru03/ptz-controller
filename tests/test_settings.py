@@ -75,3 +75,43 @@ def test_validate_reports_invalid_values() -> None:
 
 def test_validate_ok_for_defaults() -> None:
     assert Settings.defaults().validate() == []
+
+
+def test_prepare_config_seeds_from_the_bundled_template(monkeypatch, tmp_path) -> None:
+    """La primera ejecución debe dejar el YAML comentado, no un volcado."""
+    import main
+
+    template = tmp_path / "config.yaml.example"
+    template.write_text(
+        "# plantilla comentada\ncamera:\n    ip: 10.0.0.1\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(main, "bundled_file", lambda *parts: template)
+
+    target = tmp_path / "nuevo" / "config.yaml"
+    settings = main.prepare_config(target)
+
+    assert target.is_file()
+    assert "# plantilla comentada" in target.read_text(encoding="utf-8")
+    assert settings.camera.ip == "10.0.0.1"
+
+
+def test_prepare_config_keeps_an_existing_file(monkeypatch, tmp_path) -> None:
+    import main
+
+    target = tmp_path / "config.yaml"
+    target.write_text("camera:\n    ip: 9.9.9.9\n", encoding="utf-8")
+    monkeypatch.setattr(main, "bundled_file", lambda *parts: None)
+
+    assert main.prepare_config(target).camera.ip == "9.9.9.9"
+
+
+def test_prepare_config_falls_back_to_defaults_without_template(
+    monkeypatch, tmp_path
+) -> None:
+    import main
+
+    monkeypatch.setattr(main, "bundled_file", lambda *parts: None)
+    target = tmp_path / "config.yaml"
+
+    assert main.prepare_config(target).camera.ip == "192.168.1.100"
+    assert target.is_file()

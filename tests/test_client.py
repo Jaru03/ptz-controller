@@ -13,54 +13,100 @@ def test_wsdl_dir_resolves_to_existing_directory() -> None:
     assert (wsdl_dir / "ptz.wsdl").is_file()
 
 
-def test_preset_id_for_numeric_token() -> None:
-    assert OnvifClient._preset_id_for_token("3") == 3
-    assert OnvifClient._preset_id_for_token("255") == 255
-
-
-def test_preset_id_for_string_token_is_stable() -> None:
-    first = OnvifClient._preset_id_for_token("PresetEntrada")
-    second = OnvifClient._preset_id_for_token("PresetEntrada")
-    assert first == second
-    assert OnvifClient._preset_id_for_token("PresetEntrada") != OnvifClient._preset_id_for_token("PresetPatio")
-
-
 class _Preset:
     def __init__(self, token: str, name: str = "") -> None:
         self.token = token
         self.Name = name
 
 
-def test_get_presets_keeps_string_tokens() -> None:
+def _client_with_ptz(**methods) -> OnvifClient:
+    """Cliente con un servicio PTZ falso (sin red)."""
     client = OnvifClient("192.168.1.1", 80, "admin", "")
     client.profile_token = "profile-0"
-    client._ptz = type(
-        "FakePtz",
-        (),
-        {"GetPresets": lambda self, request: [_Preset("1", "Entrada"), _Preset("PresetA", "Patio")]},
-    )()
+    client._ptz = type("FakePtz", (), methods)()
+    return client
+
+
+def test_get_presets_keeps_string_tokens() -> None:
+    client = _client_with_ptz(
+        GetPresets=lambda self, request: [
+            _Preset("1", "Entrada"),
+            _Preset("PresetA", "Patio"),
+        ]
+    )
 
     presets = client.get_presets()
     assert [p.token for p in presets] == ["1", "PresetA"]
-    assert presets[0].preset_id == 1
-    assert presets[1].preset_id == OnvifClient._preset_id_for_token("PresetA")
-    assert client._preset_tokens[1] == "1"
-    assert client._preset_tokens[presets[1].preset_id] == "PresetA"
+    assert [p.name for p in presets] == ["Entrada", "Patio"]
 
 
-def test_goto_preset_uses_real_token(monkeypatch) -> None:
-    client = OnvifClient("192.168.1.1", 80, "admin", "")
-    client.profile_token = "profile-0"
+def test_get_presets_names_unnamed_presets() -> None:
+    client = _client_with_ptz(
+        GetPresets=lambda self, request: [_Preset("PresetB", "")]
+    )
+    assert client.get_presets()[0].name == "Preset PresetB"
+
+
+def test_goto_preset_sends_token_verbatim() -> None:
     sent: list[str] = []
-    client._ptz = type(
-        "FakePtz",
-        (),
-        {"GotoPreset": lambda self, request: sent.append(request["PresetToken"])},
-    )()
+    client = _client_with_ptz(
+        GotoPreset=lambda self, request: sent.append(request["PresetToken"])
+    )
 
-    client._preset_tokens[42] = "PresetPatio"
-    client.goto_preset(42)
-    assert sent == ["PresetPatio"]
-
-    client.goto_preset(99)
+    client.goto_preset("PresetPatio")
+    client.goto_preset("99")
     assert sent == ["PresetPatio", "99"]
+
+
+def test_set_preset_without_token_lets_camera_assign() -> None:
+    sent: list[dict] = []
+    client = _client_with_ptz(SetPreset=lambda self, request: sent.append(request))
+
+    client.set_preset("", "Nueva escena")
+    assert "PresetToken" not in sent[0]
+    assert sent[0]["Name"] == "Nueva escena"
+
+    client.set_preset("7")
+    assert sent[1]["PresetToken"] == "7"
+
+
+def test_continuous_move_sends_only_active_axes() -> None:
+    sent: list[dict] = []
+    client = _client_with_ptz(
+        ContinuousMove=lambda self, request: sent.append(request["Velocity"]),
+        Stop=lambda self, request: None,
+    )
+
+    client.continuous_move(0.0, 0.0, 1.0, 1.0)
+    assert sent[0] == {"Zoom": {"x": 1.0}}
+
+    client.continuous_move(1.0, 0.0, 0.0, 0.5)
+    assert sent[1] == {"PanTilt": {"x": 0.5, "y": 0.0}}
+
+
+def test_continuous_move_stops_the_axis_that_became_inactive() -> None:
+    stops: list[dict] = []
+    client = _client_with_ptz(
+        ContinuousMove=lambda self, request: None,
+        Stop=lambda self, request: stops.append(request),
+    )
+
+    client.continuous_move(0.0, 0.0, 1.0, 1.0)   # solo zoom
+    assert stops == []
+
+    client.continuous_move(1.0, 0.0, 0.0, 1.0)   # el zoom deja de enviarse
+    assert stops[-1]["Zoom"] is True
+    assert stops[-1]["PanTilt"] is False
+
+
+def test_relative_move_omits_empty_axes() -> None:
+    sent: list[dict] = []
+    client = _client_with_ptz(
+        RelativeMove=lambda self, request: sent.append(request["Translation"])
+    )
+
+    client.relative_move(0.0, 0.0, 0.05)
+    assert sent[0] == {"Zoom": {"x": 0.05}}
+
+    client.relative_move(0.0, 0.0, 0.0)
+    assert len(sent) == 1  # nada que mover: no se envía petición

@@ -17,7 +17,7 @@ from typing import Any
 import pygame
 
 from config.settings import JoystickConfig
-from controllers.base import InputController, MovementState
+from controllers.base import InputController, MovementState, PresetRegistry
 from controllers.pygame_events import PyGameEventBroker
 from core.event_bus import EventBus
 from models.commands import GotoPresetCommand, HomeCommand, SetSpeedCommand
@@ -38,12 +38,14 @@ class JoystickController(InputController):
         movement: MovementState,
         bus: EventBus,
         speed_step: float = 0.1,
+        presets: PresetRegistry | None = None,
     ) -> None:
         self._config = config
         self._broker = broker
         self._movement = movement
         self._bus = bus
         self._speed_step = speed_step
+        self._presets = presets if presets is not None else PresetRegistry(bus)
         self._axes: dict[int, dict[int, float]] = {}
         self._hats: dict[int, dict[int, tuple[int, int]]] = {}
         self._started = False
@@ -112,9 +114,13 @@ class JoystickController(InputController):
         elif button == config.speed_down_button:
             self._change_speed(-self._speed_step)
         elif button in config.preset_buttons:
-            preset_id = config.preset_buttons.index(button) + 1
-            self._bus.send(GotoPresetCommand(preset_id))
-            log.info("Joystick: GotoPreset %s (botón %s)", preset_id, button)
+            index = config.preset_buttons.index(button)
+            token = self._presets.token_at(index)
+            if token is None:
+                log.info("Joystick: no hay preset en la posición %s", index + 1)
+                return
+            self._bus.send(GotoPresetCommand(token))
+            log.info("Joystick: GotoPreset %s (botón %s)", token, button)
 
     def _on_button_up(self, event: Any) -> None:
         pass  # las acciones de botón son instantáneas (al pulsar)

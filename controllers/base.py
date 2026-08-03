@@ -4,6 +4,10 @@ Contiene el estado de movimiento compartido por teclado y joystick
 (``MovementState``) que implementa la zona muerta (deadzone) y, sobre
 todo, la regla de "solo enviar comandos cuando la dirección cambia"
 para no saturar la cámara con órdenes redundantes.
+
+También vive aquí ``PresetRegistry``, la lista de presets publicada por
+la cámara que teclado y mando consultan para traducir una tecla o botón
+al token ONVIF correspondiente.
 """
 
 from __future__ import annotations
@@ -12,9 +16,12 @@ import threading
 from abc import ABC, abstractmethod
 from typing import Callable
 
+from core.event_bus import EventBus
 from models.commands import Command, MoveCommand, StopCommand
 
 EPS = 1e-6
+
+PRESETS_TOPIC = "ptz.presets"
 
 
 def _clamp01(value: float) -> float:
@@ -33,6 +40,42 @@ def _rescale(value: float, deadzone: float) -> float:
         return 0.0
     scaled = (abs(value) - deadzone) / (1.0 - deadzone)
     return (1.0 if value > 0 else -1.0) * min(1.0, scaled)
+
+
+class PresetRegistry:
+    """Presets publicados por la cámara, en su orden original.
+
+    Los controladores de entrada asignan teclas y botones **por
+    posición** (1ª tecla -> 1er preset), así que solo necesitan poder
+    traducir un índice al token ONVIF real, que puede no ser numérico.
+    """
+
+    def __init__(self, bus: EventBus | None = None) -> None:
+        self._tokens: list[str] = []
+        self._lock = threading.RLock()
+        if bus is not None:
+            bus.subscribe(PRESETS_TOPIC, self.update)
+
+    def update(self, presets: object) -> None:
+        """Actualiza la lista desde el payload del topic ``ptz.presets``."""
+        tokens = [
+            str(getattr(preset, "token", "") or "")
+            for preset in (presets or ())  # type: ignore[union-attr]
+        ]
+        with self._lock:
+            self._tokens = [token for token in tokens if token]
+
+    def token_at(self, index: int) -> str | None:
+        """Token del preset en esa posición (None si no existe)."""
+        with self._lock:
+            if 0 <= index < len(self._tokens):
+                return self._tokens[index]
+        return None
+
+    @property
+    def tokens(self) -> list[str]:
+        with self._lock:
+            return list(self._tokens)
 
 
 class MovementState:
@@ -65,7 +108,7 @@ class MovementState:
         self._repeat_interval = max(0.03, float(repeat_interval))
         self._lock = threading.RLock()
         self._repeater: threading.Thread | None = None
-        self._stop_event = threading.Event()
+        self._stop_event: threading.Event | None = None
 
     @property
     def speed(self) -> float:
@@ -107,12 +150,19 @@ class MovementState:
             self._start_repeater()
 
     def _start_repeater(self) -> None:
-        """Arranca el hilo de reenvío periódico si aún no está vivo."""
+        """Arranca el hilo de reenvío periódico si aún no está vivo.
+
+        Cada hilo lleva su propio evento de parada: si se arranca uno
+        nuevo antes de que el anterior salga de su espera, el viejo sigue
+        detenido en vez de revivir y duplicar los envíos.
+        """
         if self._repeater is not None and self._repeater.is_alive():
             return
-        self._stop_event.clear()
+        stop_event = threading.Event()
+        self._stop_event = stop_event
         self._repeater = threading.Thread(
             target=self._repeater_loop,
+            args=(stop_event,),
             name="movement-repeat",
             daemon=True,
         )
@@ -120,15 +170,17 @@ class MovementState:
 
     def _stop_repeater(self) -> None:
         """Detiene el hilo de reenvío; este termina en la siguiente espera."""
-        if self._repeater is None:
-            return
-        self._stop_event.set()
+        if self._stop_event is not None:
+            self._stop_event.set()
+            self._stop_event = None
         self._repeater = None
 
-    def _repeater_loop(self) -> None:
+    def _repeater_loop(self, stop_event: threading.Event) -> None:
         """Reenvía el último ``MoveCommand`` mientras el movimiento siga activo."""
-        while not self._stop_event.wait(self._repeat_interval):
+        while not stop_event.wait(self._repeat_interval):
             with self._lock:
+                if stop_event.is_set():
+                    return
                 last = self._last
                 if last is not None:
                     self._publish(last)
