@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#313244"/>
+      <stop offset="1" stop-color="#15151f"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="52" fill="url(#bg)"/>
+
+  <!-- Cuerpo de la cámara -->
+  <rect x="62" y="78" width="132" height="92" rx="20" fill="#cdd6f4"/>
+  <!-- Objetivo -->
+  <circle cx="128" cy="124" r="34" fill="#15151f"/>
+  <circle cx="128" cy="124" r="22" fill="#89b4fa"/>
+  <circle cx="119" cy="115" r="7" fill="#cdd6f4" opacity="0.9"/>
+  <!-- Piloto -->
+  <circle cx="176" cy="96" r="7" fill="#a6e3a1"/>
+  <!-- Soporte -->
+  <rect x="112" y="170" width="32" height="18" fill="#a6adc8"/>
+  <rect x="86" y="188" width="84" height="14" rx="7" fill="#a6adc8"/>
+
+  <!-- Flechas de movimiento PTZ -->
+  <g fill="#f9e2af">
+    <path d="M128 26 l18 24 h-36 z"/>
+    <path d="M128 230 l18 -24 h-36 z"/>
+    <path d="M26 124 l24 -18 v36 z"/>
+    <path d="M230 124 l-24 -18 v36 z"/>
+  </g>
+</svg>
