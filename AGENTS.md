@@ -28,6 +28,7 @@ uv run pytest                       # 122 tests (offscreen Qt)
 uv sync --group build                              # PyInstaller
 uv run --group build python packaging/build.py --clean   # dist/ptz-controller
 ./packaging/install.sh                             # instala en ~/.local
+uv run --group build python packaging/build_rpm.py # RPM Fedora (dist/rpm/RPMS)
 ```
 
 ## Arquitectura (resumen)
@@ -316,6 +317,44 @@ dejar una etiqueta publicada con una release a medias).
 Los iconos se generan del SVG con `packaging/make_icons.py` (Qt para
 rasterizar y un contenedor ICO escrito a mano, sin Pillow). Al rasterizar
 con Qt, el `QByteArray` debe sobrevivir al `QBuffer` o el proceso peta.
+
+### Modo real por defecto en el build (--real)
+
+El ejecutable empaquetado (PyInstaller) arranca en **modo cámara real**
+sin pasar `--real`. `main.resolve_mock()` da ese comportamiento:
+precedencia `--mock` > `--real` > (`sys.frozen` → real) > configuración.
+`--mock` queda reservado para las pruebas de humo del CI. En desarrollo
+(`sys.frozen` ausente) el modo por defecto sigue siendo el de
+`config.yaml` (`camera.mock`). El `.desktop` (Linux) y los accesos
+directos (Windows) llaman además con `--real` explícito, que queda
+redundante pero explícito.
+
+### Vista previa como primera pestaña
+
+El orden de las pestañas de `gui/main_window.py` es: **Vista previa**,
+Simulación, Controles (la pestaña inicial es la vista previa). El test
+`test_controls_tab_lists_keyboard_and_joystick` fija ese orden.
+
+### Instalador de Windows: acceso directo siempre
+
+`packaging/install.ps1` crea **siempre** el acceso directo del escritorio
+(además del del menú Inicio); se eliminó el conmutador `-DesktopShortcut`.
+Los dos accesos apuntan al `.exe` con `--real`.
+
+### RPM para Fedora
+
+`packaging/rpm/ptz-controller.spec` + `packaging/build_rpm.py` generan un
+RPM que instala el binario en `/usr/bin/ptz-controller` con el icono y la
+entrada de menú (`Exec=ptz-controller --real`). El spec se llama distinto
+del de PyInstaller a propósito (`packaging/rpm/`). Requisitos:
+
+- Construir antes el binario (`packaging/build.py --clean`).
+- `sudo dnf install rpm-build` (más `desktop-file-utils` si se quiere
+  validar la entrada de menú).
+- `build_rpm.py` lee la versión de `pyproject.toml`, crea el source
+  tarball en `dist/rpm/SOURCES` y deja el RPM en
+  `dist/rpm/RPMS/x86_64/`. No hay etapa de compilación: el RPM debe
+  generarse en la misma distro/arquitectura que el binario.
 
 ### Pendiente de confirmar en hardware
 

@@ -3,16 +3,13 @@
     Instala ptz-controller para el usuario actual (sin permisos de administrador).
 
 .DESCRIPTION
-    Copia dist\ptz-controller.exe a %LOCALAPPDATA%\Programs\ptz-controller,
-    crea el acceso directo del menú Inicio y, opcionalmente, uno en el
-    escritorio. La configuración y los logs los crea el propio programa en
+    Copia dist\ptz-controller.exe a %LOCALAPPDATA%\Programs\ptz-controller
+    y crea accesos directos en el menú Inicio y en el escritorio. La
+    configuración y los logs los crea el propio programa en
     %APPDATA%\ptz-controller la primera vez que arranca.
 
 .PARAMETER Uninstall
     Desinstala la aplicación (conserva la configuración del usuario).
-
-.PARAMETER DesktopShortcut
-    Crea además un acceso directo en el escritorio.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File packaging\install.ps1
@@ -23,8 +20,7 @@
 
 [CmdletBinding()]
 param(
-    [switch]$Uninstall,
-    [switch]$DesktopShortcut
+    [switch]$Uninstall
 )
 
 $ErrorActionPreference = 'Stop'
@@ -98,10 +94,8 @@ New-Item -ItemType Directory -Force -Path $StartMenuDir | Out-Null
 New-Shortcut -Path $StartMenuLink -Target $TargetBinary
 Write-Host "  Menú Inicio: $StartMenuLink"
 
-if ($DesktopShortcut) {
-    New-Shortcut -Path $DesktopLink -Target $TargetBinary
-    Write-Host "  Escritorio: $DesktopLink"
-}
+New-Shortcut -Path $DesktopLink -Target $TargetBinary
+Write-Host "  Escritorio: $DesktopLink"
 
 Write-Host ''
 Write-Host "Listo. Búsquelo como '$AppName' en el menú Inicio."

@@ -89,6 +89,22 @@ def prepare_config(path: Path) -> Settings:
     return Settings.ensure_default_config(path)
 
 
+def resolve_mock(args: argparse.Namespace, settings: Settings) -> bool:
+    """Decide si se usa el modo simulado (Mock).
+
+    Precedencia: ``--mock`` y ``--real`` explicitos y, si no se indica
+    nada, la configuración en desarrollo. El ejecutable empaquetado
+    (PyInstaller, ``sys.frozen``) arranca en modo real por defecto:
+    así el binario publicado controla la cámara ONVIF sin más
+    argumentos y ``--mock`` queda reservado para pruebas de humo.
+    """
+    if args.mock:
+        return True
+    if args.real:
+        return False
+    return False if sys.frozen else settings.camera.mock
+
+
 def create_ptz_controller(settings: Settings, mock: bool) -> PTZController:
     """Crea el controlador PTZ según el modo elegido."""
     camera = settings.camera
@@ -124,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
     level = args.log_level or settings.logging.level
     setup_logging(level=level, log_dir=default_log_dir(settings.logging.directory))
 
-    mock = args.mock or (settings.camera.mock and not args.real)
+    mock = resolve_mock(args, settings)
 
     bus = EventBus()
     ref = Ref(create_ptz_controller(settings, mock))

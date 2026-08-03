@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=Controlador PTZ ONVIF
+GenericName=Controlador de cámaras PTZ
+Comment=Controla cámaras PTZ ONVIF con teclado o mando
+Exec=ptz-controller --real
+TryExec=ptz-controller
+Icon=ptz-controller
+Terminal=false
+Categories=AudioVideo;Video;Player;
+Keywords=PTZ;ONVIF;camera;RTSP;
+StartupNotify=true
+Actions=Mock;
+
+[Desktop Action Mock]
+Name=Modo simulado (sin cámara)
+Exec=ptz-controller --mock

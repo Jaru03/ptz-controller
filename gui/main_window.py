@@ -181,8 +181,8 @@ class MainWindow(QMainWindow):
             self._settings.keyboard, self._settings.joystick
         )
         tabs = QTabWidget()
-        tabs.addTab(self._camera_widget, "Simulación")
         tabs.addTab(self._video_widget, "Vista previa")
+        tabs.addTab(self._camera_widget, "Simulación")
         tabs.addTab(self._controls_widget, "Controles")
         tabs.setCurrentIndex(0)
 

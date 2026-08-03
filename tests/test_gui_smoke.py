@@ -130,8 +130,8 @@ def test_controls_tab_lists_keyboard_and_joystick(qapp: QApplication) -> None:
     tabs = window.findChild(QTabWidget)
     assert tabs is not None
     assert [tabs.tabText(i) for i in range(tabs.count())] == [
-        "Simulación",
         "Vista previa",
+        "Simulación",
         "Controles",
     ]
     controls = window.findChild(ControlsWidget)
