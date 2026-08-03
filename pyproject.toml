@@ -1,6 +1,6 @@
 [project]
 name = "ptz-controller"
-version = "0.1.0"
+version = "0.2.0"
 description = "Controlador universal de cámaras PTZ ONVIF (teclado, gamepad, interfaz PySide6)"
 readme = "README.md"
 authors = [
