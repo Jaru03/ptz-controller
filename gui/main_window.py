@@ -55,6 +55,7 @@ from core.ref import Ref
 from gui.camera_widget import CameraWidget
 from gui.controls_widget import ControlsWidget
 from gui.settings_dialog import SettingsDialog
+from gui.updates_widget import UpdatesWidget
 from gui.video_widget import VideoWidget
 from models.commands import (
     ConnectCommand,
@@ -184,6 +185,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(self._video_widget, "Vista previa")
         tabs.addTab(self._camera_widget, "Simulación")
         tabs.addTab(self._controls_widget, "Controles")
+        tabs.addTab(UpdatesWidget(), "Actualizaciones")
         tabs.setCurrentIndex(0)
 
         controls = self._build_controls_panel()

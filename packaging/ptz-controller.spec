@@ -43,6 +43,9 @@ def _wsdl_dir() -> Path:
 datas = [
     (str(_wsdl_dir()), "wsdl"),
     (str(PROJECT_ROOT / "config.yaml.example"), "."),
+    # pyproject.toml se empaqueta para leer la versión en la pestaña de
+    # actualizaciones también en el ejecutable (models/version.py).
+    (str(PROJECT_ROOT / "pyproject.toml"), "."),
     (str(PACKAGING_DIR / "icon.png"), "."),
 ]
 # zeep lee sus XSD/XML de plantilla en tiempo de ejecución.

@@ -332,8 +332,25 @@ redundante pero explícito.
 ### Vista previa como primera pestaña
 
 El orden de las pestañas de `gui/main_window.py` es: **Vista previa**,
-Simulación, Controles (la pestaña inicial es la vista previa). El test
-`test_controls_tab_lists_keyboard_and_joystick` fija ese orden.
+Simulación, Controles, Actualizaciones (la pestaña inicial es la vista
+previa). El test `test_controls_tab_lists_keyboard_and_joystick` fija ese
+orden.
+
+### Pestaña de actualizaciones
+
+`gui/updates_widget.py` muestra la versión instalada y consulta la API de
+releases de GitHub (`models/version.py`) al pulsar "Buscar
+actualizaciones". Reglas:
+
+- La red corre siempre en un hilo en segundo plano (`threading.Thread`
+  daemon) y el resultado llega por la señal `check_done`; nunca en el
+  hilo de la GUI.
+- La versión se lee de `pyproject.toml` (fuente única): en desarrollo
+  desde la raíz y en el ejecutable desde el archivo empaquetado por
+  PyInstaller. **No hardcodear versiones**: si el `.spec` deja de
+  incluir `pyproject.toml`, la pestaña romperá solo en el binario.
+- No hay auto-comprobación al arrancar para no lanzar tráfico de red sin
+  que el usuario lo pida.
 
 ### Instalador de Windows: acceso directo siempre
 

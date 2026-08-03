@@ -133,6 +133,7 @@ def test_controls_tab_lists_keyboard_and_joystick(qapp: QApplication) -> None:
         "Vista previa",
         "Simulación",
         "Controles",
+        "Actualizaciones",
     ]
     controls = window.findChild(ControlsWidget)
     assert controls is not None
