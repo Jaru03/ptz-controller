@@ -35,12 +35,23 @@ class CameraConfig:
 
 @dataclass
 class MovementConfig:
-    """Comportamiento del movimiento PTZ."""
+    """Comportamiento del movimiento PTZ.
+
+    ``zoom_mode`` decide cómo se traduce el eje de zoom a ONVIF:
+      - 'step': cada repetición envía un ``RelativeMove`` de ``zoom_step``,
+        de modo que el zoom avanza a saltos y se puede parar en puntos
+        intermedios aunque el firmware ignore el ``Stop`` del zoom.
+      - 'continuous': ``ContinuousMove`` + ``Stop`` (como el pan/tilt).
+      - 'auto': intenta 'step' y cae a 'continuous' si la cámara rechaza
+        el ``RelativeMove``.
+    """
 
     speed: float = 0.5
     speeds: list[float] = field(default_factory=lambda: [0.2, 0.5, 0.8])
     deadzone: float = 0.08
     repeat_interval_ms: int = 150
+    zoom_mode: str = "auto"
+    zoom_step: float = 0.06
 
 
 @dataclass
@@ -52,6 +63,13 @@ class KeyboardConfig:
       - 'pynput': teclado global (requiere X11 o permisos del grupo input).
       - 'qt': eventos de teclado de la propia ventana PySide6 (fiable en
         Wayland y Windows).
+
+    Presets: ``preset_keys`` asigna teclas **por posición** a los presets
+    que devuelve la cámara (la 1ª tecla va al 1er preset, etc.), de modo
+    que funcionan sea cual sea su token ONVIF. ``preset_hotkeys`` permite
+    fijar una tecla a un token concreto ('f1': 'PresetA') y tiene
+    prioridad. Las teclas del pad numérico se nombran 'kp_1'...'kp_0' y,
+    si no están mapeadas, caen a su dígito equivalente.
     """
 
     backend: str = "auto"
@@ -61,11 +79,24 @@ class KeyboardConfig:
     right: str = "d"
     zoom_in: str = "e"
     zoom_out: str = "q"
-    preset_hotkeys: dict[str, int] = field(
-        default_factory=lambda: {"1": 1, "2": 2, "3": 3}
+    preset_keys: list[str] = field(
+        default_factory=lambda: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
     )
+    preset_hotkeys: dict[str, str] = field(default_factory=dict)
     stop: str = "space"
     quit: str = "esc"
+
+    def __post_init__(self) -> None:
+        """Normaliza los mapeos de presets cargados del YAML.
+
+        Los tokens ONVIF son cadenas; una configuración antigua podía
+        guardarlos como enteros ({'1': 1}), así que se convierten aquí.
+        """
+        self.preset_keys = [str(key).lower() for key in self.preset_keys]
+        self.preset_hotkeys = {
+            str(key).lower(): str(token)
+            for key, token in dict(self.preset_hotkeys).items()
+        }
 
 
 @dataclass
@@ -189,6 +220,12 @@ class Settings:
             warnings.append("movement.deadzone debe estar entre 0 y 1")
         if not (0.0 <= movement.speed <= 1.0):
             warnings.append("movement.speed debe estar entre 0 y 1")
+        if movement.zoom_mode not in ("auto", "step", "continuous"):
+            warnings.append(
+                f"movement.zoom_mode '{movement.zoom_mode}' no es válido"
+            )
+        if not (0.0 < movement.zoom_step <= 1.0):
+            warnings.append("movement.zoom_step debe estar entre 0 y 1")
         if self.keyboard.backend not in ("auto", "pynput", "qt"):
             warnings.append(
                 f"keyboard.backend '{self.keyboard.backend}' no es válido"

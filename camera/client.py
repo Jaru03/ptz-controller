@@ -7,16 +7,16 @@ en coordenadas normalizadas -1..1, igual que la interfaz ``PTZController``.
 
 from __future__ import annotations
 
-import os
-import zlib
 from pathlib import Path
 from typing import Any
 
 import onvif
 from onvif import ONVIFCamera  # onvif-zeep (módulo ``onvif``)
+from zeep.transports import Transport
 
 from models.commands import PresetInfo
 from utils.logger import get_logger
+from utils.paths import resource_dir
 
 log = get_logger(__name__)
 
@@ -35,7 +35,14 @@ def _resolve_wsdl_dir() -> str:
     en ``site-packages/wsdl``. Se comprueba la ubicación canónica y, si no
     existe, se busca en los site-packages de todas las versiones de Python
     del venv actual.
+
+    En un ejecutable empaquetado los WSDL viajan dentro del bundle, así
+    que esa copia tiene prioridad: sin ella la conexión ONVIF falla al
+    crear el cliente zeep.
     """
+    bundled = resource_dir() / "wsdl"
+    if bundled.is_dir():
+        return str(bundled)
     onvif_pkg = Path(getattr(onvif, "__file__", "")).resolve().parent
     site = onvif_pkg.parent  # .../lib/pythonX.Y/site-packages
     expected = site / "wsdl"
@@ -80,7 +87,8 @@ class OnvifClient:
         self._device: Any = None
         self.profile_token: str | None = None
         self._stream_uri: str = ""
-        self._preset_tokens: dict[int, str] = {}
+        self._moving_pan_tilt = False
+        self._moving_zoom = False
 
     # -- Ciclo de vida ----------------------------------------------------
 
@@ -94,6 +102,7 @@ class OnvifClient:
                 self._password,
                 wsdl_dir=_resolve_wsdl_dir(),
                 no_cache=True,
+                transport=self._build_transport(),
             )
         except Exception as exc:  # noqa: BLE001 - errores de red/soap variados
             raise CameraError(f"No se pudo crear el cliente ONVIF: {exc}") from exc
@@ -115,7 +124,17 @@ class OnvifClient:
         self._device = None
         self.profile_token = None
         self._stream_uri = ""
-        self._preset_tokens = {}
+        self._moving_pan_tilt = False
+        self._moving_zoom = False
+
+    def _build_transport(self) -> Transport:
+        """Transporte zeep con timeouts explícitos.
+
+        Sin ellos, ``requests`` espera indefinidamente (``connect
+        timeout=None``): una cámara que deja de responder bloquea el hilo
+        que hace la llamada durante minutos.
+        """
+        return Transport(timeout=self._timeout, operation_timeout=self._timeout)
 
     # -- Información del dispositivo -------------------------------------
 
@@ -181,6 +200,10 @@ class OnvifClient:
         Solo se incluyen los ejes con velocidad distinta de cero: algunas
         cámaras ignoran el zoom si reciben un ``PanTilt`` vacío a la vez,
         y el estándar ONVIF permite omitir los componentes inactivos.
+
+        Omitir un eje **no lo detiene**: la cámara mantiene la última
+        velocidad recibida para él. Por eso, cuando un eje que estaba
+        activo deja de estarlo, se envía antes un ``Stop`` de ese eje.
         """
         self._require_ptz()
         velocity: dict[str, Any] = {}
@@ -191,6 +214,10 @@ class OnvifClient:
         if not velocity:
             self.stop()
             return
+
+        self.stop_inactive_axes(
+            pan_tilt="PanTilt" in velocity, zoom="Zoom" in velocity
+        )
         try:
             self._ptz.ContinuousMove(
                 {"ProfileToken": self.profile_token, "Velocity": velocity}
@@ -198,20 +225,39 @@ class OnvifClient:
             log.debug("ContinuousMove enviado: %s", velocity)
         except Exception as exc:  # noqa: BLE001
             raise CameraError(f"ContinuousMove falló: {exc}") from exc
+        self._moving_pan_tilt = "PanTilt" in velocity
+        self._moving_zoom = "Zoom" in velocity
 
-    def stop(self) -> None:
-        """Detiene el movimiento (Stop con pan/tilt y zoom)."""
+    def stop(self, pan_tilt: bool = True, zoom: bool = True) -> None:
+        """Detiene el movimiento de los ejes indicados (Stop)."""
         self._require_ptz()
+        if not pan_tilt and not zoom:
+            return
         try:
             self._ptz.Stop(
                 {
                     "ProfileToken": self.profile_token,
-                    "PanTilt": True,
-                    "Zoom": True,
+                    "PanTilt": pan_tilt,
+                    "Zoom": zoom,
                 }
             )
         except Exception as exc:  # noqa: BLE001
             raise CameraError(f"Stop falló: {exc}") from exc
+        if pan_tilt:
+            self._moving_pan_tilt = False
+        if zoom:
+            self._moving_zoom = False
+
+    def stop_inactive_axes(self, pan_tilt: bool, zoom: bool) -> None:
+        """Detiene los ejes que estaban en marcha y ya no se envían.
+
+        No se envía nada si no había ningún eje en marcha, de modo que
+        puede llamarse en cada repetición sin generar tráfico inútil.
+        """
+        stop_pan_tilt = self._moving_pan_tilt and not pan_tilt
+        stop_zoom = self._moving_zoom and not zoom
+        if stop_pan_tilt or stop_zoom:
+            self.stop(pan_tilt=stop_pan_tilt, zoom=stop_zoom)
 
     def absolute_move(self, pan: float, tilt: float, zoom: float) -> None:
         """Desplaza a una posición absoluta normalizada (AbsoluteMove)."""
@@ -228,16 +274,31 @@ class OnvifClient:
             raise CameraError(f"AbsoluteMove falló: {exc}") from exc
 
     def relative_move(self, pan: float, tilt: float, zoom: float) -> None:
-        """Desplazamiento relativo (RelativeMove)."""
+        """Desplazamiento relativo (RelativeMove) de los ejes activos.
+
+        Igual que en ``continuous_move``, se omiten los ejes a cero para
+        que la cámara no reciba una traslación vacía junto a la útil.
+        """
         self._require_ptz()
+        translation: dict[str, Any] = {}
+        speed: dict[str, Any] = {}
+        if pan or tilt:
+            translation["PanTilt"] = {"x": _clamp(pan), "y": _clamp(tilt)}
+            speed["PanTilt"] = {"x": 1.0, "y": 1.0}
+        if zoom:
+            translation["Zoom"] = {"x": _clamp(zoom)}
+            speed["Zoom"] = {"x": 1.0}
+        if not translation:
+            return
         try:
             self._ptz.RelativeMove(
                 {
                     "ProfileToken": self.profile_token,
-                    "Translation": {"PanTilt": {"x": _clamp(pan), "y": _clamp(tilt)}, "Zoom": {"x": _clamp(zoom)}},
-                    "Speed": {"PanTilt": {"x": 1.0, "y": 1.0}, "Zoom": {"x": 1.0}},
+                    "Translation": translation,
+                    "Speed": speed,
                 }
             )
+            log.debug("RelativeMove enviado: %s", translation)
         except Exception as exc:  # noqa: BLE001
             raise CameraError(f"RelativeMove falló: {exc}") from exc
 
@@ -252,7 +313,7 @@ class OnvifClient:
             (p for p in presets if p.name.lower() in ("home", "inicio")), None
         )
         if home_preset is not None:
-            self.goto_preset(home_preset.preset_id)
+            self.goto_preset(home_preset.token)
             return
         try:
             self._ptz.AbsoluteMove(
@@ -265,36 +326,27 @@ class OnvifClient:
         except Exception as exc:  # noqa: BLE001
             raise CameraError(f"home falló: {exc}") from exc
 
-    def goto_preset(self, preset_id: int) -> None:
-        """Desplaza la cámara a un preset (GotoPreset).
-
-        Usa el token ONVIF real de la cámara (ver :meth:`get_presets`), de
-        modo que funcionan presets cuyo token no es un número.
-        """
+    def goto_preset(self, token: str) -> None:
+        """Desplaza la cámara al preset con el token ONVIF indicado."""
         self._require_ptz()
         try:
             self._ptz.GotoPreset(
-                {
-                    "ProfileToken": self.profile_token,
-                    "PresetToken": self._preset_token(preset_id),
-                }
+                {"ProfileToken": self.profile_token, "PresetToken": str(token)}
             )
         except Exception as exc:  # noqa: BLE001
             raise CameraError(f"GotoPreset falló: {exc}") from exc
 
-    def set_preset(self, preset_id: int, name: str = "") -> None:
+    def set_preset(self, token: str = "", name: str = "") -> None:
         """Guarda la posición actual como preset (SetPreset).
 
-        Si ``name`` no está vacío, se asigna ese nombre al preset. El
-        estándar ONVIF no ofrece un comando de renombrado propio: si el
-        ``PresetToken`` ya existe y solo se envía un nombre, la mayoría de
-        cámaras actualizan el nombre conservando la posición guardada.
+        Con ``token`` vacío la cámara crea un preset nuevo y elige ella el
+        token; con un token existente se sobrescribe ese preset. Si
+        ``name`` no está vacío se asigna ese nombre.
         """
         self._require_ptz()
-        request = {
-            "ProfileToken": self.profile_token,
-            "PresetToken": str(preset_id),
-        }
+        request: dict[str, Any] = {"ProfileToken": self.profile_token}
+        if token:
+            request["PresetToken"] = str(token)
         if name:
             request["Name"] = name
         try:
@@ -302,7 +354,7 @@ class OnvifClient:
         except Exception as exc:  # noqa: BLE001
             raise CameraError(f"SetPreset falló: {exc}") from exc
 
-    def rename_preset(self, preset_id: int, name: str) -> None:
+    def rename_preset(self, token: str, name: str) -> None:
         """Cambia el nombre de un preset (SetPreset con token y Name).
 
         ONVIF no define ``RenamePreset``; se reutiliza SetPreset sobre el
@@ -316,32 +368,29 @@ class OnvifClient:
             self._ptz.SetPreset(
                 {
                     "ProfileToken": self.profile_token,
-                    "PresetToken": self._preset_token(preset_id),
+                    "PresetToken": str(token),
                     "Name": name,
                 }
             )
         except Exception as exc:  # noqa: BLE001
             raise CameraError(f"SetPreset (renombrar) falló: {exc}") from exc
 
-    def remove_preset(self, preset_id: int) -> None:
+    def remove_preset(self, token: str) -> None:
         """Elimina un preset (RemovePreset)."""
         self._require_ptz()
         try:
             self._ptz.RemovePreset(
-                {
-                    "ProfileToken": self.profile_token,
-                    "PresetToken": self._preset_token(preset_id),
-                }
+                {"ProfileToken": self.profile_token, "PresetToken": str(token)}
             )
         except Exception as exc:  # noqa: BLE001
             raise CameraError(f"RemovePreset falló: {exc}") from exc
 
     def get_presets(self) -> list[PresetInfo]:
-        """Devuelve la lista de presets (GetPresets).
+        """Devuelve la lista de presets (GetPresets) en el orden de la cámara.
 
-        Los presets de la cámara pueden usar tokens no numéricos (p. ej.
-        'PresetA' o UUIDs). Se conserva el token real y se genera un
-        ``preset_id`` numérico estable solo para la interfaz.
+        Los tokens se conservan tal cual: ONVIF permite que no sean
+        numéricos ('PresetA', UUIDs...) y cualquier conversión perdería
+        presets por el camino.
         """
         self._require_ptz()
         try:
@@ -349,15 +398,12 @@ class OnvifClient:
         except Exception as exc:  # noqa: BLE001
             raise CameraError(f"GetPresets falló: {exc}") from exc
         presets: list[PresetInfo] = []
-        self._preset_tokens = {}
         for preset in raw_presets:
             token = str(_getattr(preset, "token") or "").strip()
             if not token:
                 continue
             name = str(_getattr(preset, "Name") or "").strip() or f"Preset {token}"
-            preset_id = self._preset_id_for_token(token)
-            self._preset_tokens[preset_id] = token
-            presets.append(PresetInfo(preset_id=preset_id, name=name, token=token))
+            presets.append(PresetInfo(token=token, name=name))
         return presets
 
     def get_position(self) -> dict[str, float]:
@@ -381,22 +427,6 @@ class OnvifClient:
     def _require_ptz(self) -> None:
         if self._ptz is None or self.profile_token is None:
             raise CameraError("Cliente ONVIF no conectado o sin perfil PTZ")
-
-    def _preset_token(self, preset_id: int) -> str:
-        """Devuelve el token ONVIF real del preset (o su número como texto)."""
-        return self._preset_tokens.get(preset_id, str(preset_id))
-
-    @staticmethod
-    def _preset_id_for_token(token: str) -> int:
-        """Convierte un token ONVIF a un id numérico estable para la GUI.
-
-        Si el token es numérico se usa tal cual; si no, se deriva un
-        entero determinista (los tokens de la cámara no cambian).
-        """
-        try:
-            return int(token)
-        except ValueError:
-            return zlib.crc32(token.encode("utf-8")) & 0x7FFFFFFF
 
 
 def _getattr(obj: Any, name: str, default: Any = "") -> Any:

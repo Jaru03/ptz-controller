@@ -14,18 +14,73 @@ futuro sin tocar el resto del sistema.
 
 ## Requisitos
 
-- Python 3.12+ (proyecto desarrollado y verificado con Python 3.13)
-- [uv](https://docs.astral.sh/uv/) (gestor de dependencias)
 - Linux o Windows
+- Para usarlo desde el ejecutable: **nada más**
+- Para ejecutarlo desde el código: Python 3.12+ (verificado con 3.13) y
+  [uv](https://docs.astral.sh/uv/)
 
 ## Instalación
+
+### Ejecutable (usuario final)
+
+Descargue el paquete de su plataforma desde la página de
+[Releases](https://github.com/Jaru03/ptz-controller/releases) y ejecute el
+instalador que trae dentro. No hace falta Python ni permisos de
+administrador: todo se instala en el perfil del usuario.
+
+```bash
+# Linux
+tar -xzf ptz-controller-linux-x86_64.tar.gz
+cd ptz-controller-linux-x86_64
+./install.sh              # instala en ~/.local/bin y en el menú de aplicaciones
+./install.sh --uninstall  # desinstala (conserva la configuración)
+```
+
+```powershell
+# Windows: descomprima el .zip y, dentro de la carpeta,
+powershell -ExecutionPolicy Bypass -File install.ps1
+powershell -ExecutionPolicy Bypass -File install.ps1 -Uninstall
+```
+
+La primera vez que arranca crea su configuración comentada en
+`~/.config/ptz-controller/config.yaml` (Linux) o
+`%APPDATA%\ptz-controller\config.yaml` (Windows), junto con los logs.
+Ahí se indican la IP, el usuario y la contraseña de la cámara.
+
+### Desde el código (desarrollo)
 
 ```bash
 cd ptz-controller
 uv sync --group dev
 ```
 
+En este modo la configuración y los logs siguen viviendo en la raíz del
+proyecto, como siempre.
+
+### Construir el ejecutable
+
+```bash
+uv sync --group build
+uv run --group build python packaging/build.py --clean
+```
+
+Deja `dist/ptz-controller` (o `dist/ptz-controller.exe`), un binario
+autocontenido de unos 175 MB que incluye Python, PySide6, OpenCV y los
+WSDL de ONVIF. PyInstaller **no** hace compilación cruzada: cada binario
+debe construirse en su plataforma. El workflow `Build` de GitHub Actions
+genera ambos y los publica al etiquetar una versión `vX.Y.Z`.
+
 ## Uso
+
+Instalado como ejecutable, se lanza desde el menú de aplicaciones (con la
+acción *Modo simulado* disponible en Linux) o desde la terminal:
+
+```bash
+ptz-controller --real     # cámara real ONVIF
+ptz-controller --mock     # modo simulado
+```
+
+Desde el código:
 
 ```bash
 # Modo simulado (recomendado para probar sin cámara)
@@ -40,8 +95,9 @@ uv run python main.py --no-joystick
 uv run python main.py --log-level DEBUG
 ```
 
-La primera vez se genera automáticamente `config.yaml` a partir de los
-valores por defecto.
+La primera vez se genera automáticamente el `config.yaml`: desde el
+ejecutable a partir de la plantilla comentada `config.yaml.example`, y
+desde el código a partir de los valores por defecto.
 
 ## Controles
 
@@ -51,15 +107,25 @@ valores por defecto.
 | --- | --- |
 | W / S / A / D | Arriba / Abajo / Izquierda / Derecha (diagonales soportadas) |
 | E / Q | Zoom + / Zoom - |
-| 1 / 2 / 3 | Ir a escena (preset) 1 / 2 / 3 |
+| 1 … 9, 0 (también en el pad numérico) | Ir a la escena 1ª … 10ª |
 | ESPACIO | Stop |
 | ESC | Salir |
 
 Solo se envían comandos a la cámara cuando la dirección cambia. Las teclas
-de escena son configurables: `config.yaml` → `keyboard.preset_hotkeys`
-(tecla → id de preset); pulsarlas detiene el movimiento y desplaza la
-cámara a esa escena. La velocidad se ajusta con el deslizador de la
-interfaz o con el mando.
+de escena se asignan **por posición** a los presets que devuelve la cámara
+(`config.yaml` → `keyboard.preset_keys`), así que funcionan con cualquier
+token ONVIF, incluidos los que no son números, y no hay que tocar nada al
+añadir escenas. Para fijar una tecla a un token concreto está
+`keyboard.preset_hotkeys` (p. ej. `f1: PresetEntrada`), que tiene
+prioridad. La lista de presets de la interfaz muestra el token y la tecla
+de cada escena. La velocidad se ajusta con el deslizador de la interfaz o
+con el mando.
+
+El zoom se controla con `movement.zoom_mode`: `step` (por defecto vía
+`auto`) avanza a saltos de `movement.zoom_step` con `RelativeMove`, de
+modo que se puede parar en posiciones intermedias aunque el firmware de
+la cámara ignore el `Stop` del eje de zoom; `continuous` usa
+`ContinuousMove` + `Stop` como el pan/tilt.
 
 ### Mando (joystick)
 
@@ -68,7 +134,7 @@ interfaz o con el mando.
 | Stick izquierdo | Pan / Tilt proporcional |
 | R2 / L2 | Zoom + / Zoom - |
 | R1 / L1 | Velocidad + / Velocidad - |
-| Botones (por defecto 0-3) | Ir a preset 1-4 |
+| Botones (por defecto 0-3) | Ir a la escena 1ª - 4ª |
 | PS / Home | Home |
 
 El mando se detecta automáticamente (hotplug incluido). El movimiento es
@@ -101,9 +167,10 @@ ptz-controller/
 │   ├── mock_ptz.py            # Cámara simulada (Mock)
 │   └── discovery.py           # Descubrimiento WS-Discovery (UDP)
 ├── controllers/               # Entrada: teclado y joystick
-├── core/                      # EventBus (mediador) + Ref
+├── core/                      # EventBus (mediador), Ref y worker de comandos
 ├── gui/                       # PySide6 (ventana, cámara, vídeo, ajustes)
-├── utils/                     # Logging (consola + archivo rotativo)
+├── utils/                     # Logging y resolución de rutas
+├── packaging/                 # Ejecutable (PyInstaller), iconos e instaladores
 └── tests/                     # pytest
 ```
 
@@ -118,7 +185,11 @@ instantáneas de estado (marshalled al hilo de la interfaz).
 - **`models/commands.py`** — Comandos inmutables (`MoveCommand`,
   `StopCommand`, presets, etc.) y `PTZStatus`, el "lenguaje" del sistema.
 - **`core/event_bus.py`** — `EventBus` seguro para hilos; temas `command.*`,
-  `ptz.status`, `input.keyboard`, `input.joystick`, etc.
+  `ptz.status`, `ptz.presets`, `ptz.stream`, `input.keyboard`,
+  `input.joystick`, etc.
+- **`core/command_worker.py`** — Ejecuta el trabajo de cámara (peticiones
+  SOAP) en un hilo propio, fusionando los comandos repetidos, para no
+  bloquear el hilo de la GUI.
 - **`camera/ptz_controller.py`** — `PTZController` (ABC) e implementación
   ONVIF sobre `OnvifClient`.
 - **`camera/client.py`** — Servicios Media/PTZ/Device: ContinuousMove,
@@ -128,8 +199,9 @@ instantáneas de estado (marshalled al hilo de la interfaz).
   notifica instantáneas; no requiere hardware.
 - **`camera/discovery.py`** — WS-Discovery por UDP multicast (sin
   dependencias adicionales).
-- **`controllers/base.py`** — `MovementState`: zona muerta re-escalada y
-  emisión solo ante cambios de dirección (usado por teclado y joystick).
+- **`controllers/base.py`** — `MovementState` (zona muerta re-escalada,
+  emisión solo ante cambios de dirección y reenvío periódico) y
+  `PresetRegistry` (posición → token ONVIF), usados por teclado y mando.
 - **`controllers/keyboard_controller.py`** — Backends pynput/Qt con la
   misma lógica.
 - **`controllers/pygame_events.py`** — Bucle de eventos SDL compartido
@@ -140,11 +212,18 @@ instantáneas de estado (marshalled al hilo de la interfaz).
   `QtEventBridge` (marshalling bus → señales Qt).
 - **`gui/camera_widget.py`** — Representación visual de la cámara (punto,
   ejes, flechas, zoom, velocidad).
-- **`gui/video_widget.py`** — Vista previa RTSP con OpenCV en un hilo.
+- **`gui/video_widget.py`** — Vista previa RTSP con OpenCV en un hilo:
+  transporte configurable, timeouts de socket, reconexión con backoff y
+  limitación de fps solo en la emisión hacia la GUI.
 - **`gui/settings_dialog.py`** — Edición de IP/puerto/usuario/velocidad/
   deadzone y guardado en YAML.
 - **`utils/logger.py`** — Logging a consola y archivo rotativo
   (`logs/ptz-controller.log`).
+- **`utils/paths.py`** — Decide dónde viven recursos, configuración y logs
+  según se ejecute desde el código o desde un ejecutable empaquetado.
+- **`packaging/`** — `build.py` (construye el binario), el `.spec` de
+  PyInstaller, `make_icons.py` (SVG → PNG/ICO) e `install.sh` /
+  `install.ps1` para instalar en el perfil del usuario.
 
 ## Tests
 

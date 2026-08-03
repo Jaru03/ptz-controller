@@ -22,7 +22,10 @@ log = get_logger(__name__)
 
 _RECONNECT_BASE_DELAY_S = 1.0
 _RECONNECT_MAX_DELAY_S = 8.0
-_STREAM_TIMEOUT_US = 5_000_000  # stimeout de FFmpeg: 5 s en microsegundos
+_STREAM_TIMEOUT_US = 5_000_000  # timeout de socket de FFmpeg: 5 s (microsegundos)
+_MAX_DELAY_US = 500_000  # margen máximo de reordenación: 0,5 s
+_SOCKET_BUFFER_BYTES = 1_048_576  # búfer de recepción: absorbe ráfagas por WiFi
+_MAX_READ_FAILURES = 3  # lecturas fallidas seguidas antes de reconectar
 
 
 def build_ffmpeg_options(transport: str) -> str:
@@ -32,10 +35,26 @@ def build_ffmpeg_options(transport: str) -> str:
     separadas por ``|``. El transporte RTSP TCP evita la pérdida de
     paquetes RTP/UDP, principal causa de errores de referencia H.264
     ("reference picture missing", "mmco: unref short failure", ...).
+
+    Se envían ``timeout`` y ``stimeout`` a la vez a propósito: FFmpeg
+    renombró la opción en la versión 5 y cada rueda de ``opencv-python``
+    empaqueta su propia versión; la que no exista se ignora. Sin ella
+    ``read()`` puede quedarse bloqueado indefinidamente y el stream nunca
+    se reconecta.
     """
-    options = [f"rtsp_transport;{transport}"]
+    options = [
+        f"rtsp_transport;{transport}",
+        f"timeout;{_STREAM_TIMEOUT_US}",
+        f"stimeout;{_STREAM_TIMEOUT_US}",
+        f"max_delay;{_MAX_DELAY_US}",
+        f"buffer_size;{_SOCKET_BUFFER_BYTES}",
+        "fflags;nobuffer",
+        "flags;low_delay",
+    ]
     if transport == "tcp":
-        options.append(f"stimeout;{_STREAM_TIMEOUT_US}")
+        # Sobre TCP los paquetes llegan en orden: la cola de reordenación
+        # solo añadiría latencia.
+        options.append("reorder_queue_size;0")
     return "|".join(options)
 
 
@@ -49,6 +68,19 @@ def build_ffmpeg_loglevel() -> str:
     recuperan en el siguiente keyframe (IDR).
     """
     return "32" if get_app_log_level() <= logging.DEBUG else "0"
+
+
+def _to_qimage(frame) -> QImage:
+    """Convierte un frame BGR de OpenCV en un ``QImage`` independiente."""
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    height, width, channels = rgb.shape
+    return QImage(
+        rgb.data,
+        width,
+        height,
+        channels * width,
+        QImage.Format.Format_RGB888,
+    ).copy()
 
 
 class VideoStreamThread(QThread):
@@ -76,7 +108,6 @@ class VideoStreamThread(QThread):
 
     def run(self) -> None:
         self._running = True
-        frame_interval = 1.0 / self._fps
         retries = 0
         first_failure = True
         while self._running:
@@ -95,22 +126,7 @@ class VideoStreamThread(QThread):
             log.info("Stream RTSP abierto (transporte %s): %s", self._transport, self._url)
             first_failure = True
             retries = 0
-            while self._running:
-                ok, frame = capture.read()
-                if not ok:
-                    log.warning("Stream interrumpido; reintentando…")
-                    break
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                height, width, channels = rgb.shape
-                qimage = QImage(
-                    rgb.data,
-                    width,
-                    height,
-                    channels * width,
-                    QImage.Format.Format_RGB888,
-                ).copy()
-                self.frame_ready.emit(qimage)
-                time.sleep(frame_interval)
+            self._consume(capture)
             capture.release()
             if not self._running:
                 break
@@ -121,6 +137,34 @@ class VideoStreamThread(QThread):
         log.info("Stream RTSP cerrado")
 
     # -- Internos ---------------------------------------------------------
+
+    def _consume(self, capture: cv2.VideoCapture) -> None:
+        """Lee frames hasta que el stream falla o se pide la parada.
+
+        Se lee **sin pausas**: ``read()`` ya bloquea hasta que llega el
+        siguiente frame, así que dormir entre lecturas hace que el búfer
+        de recepción se llene y la imagen acabe llegando con retardo
+        creciente, a tirones y con cortes. El límite de fps se aplica
+        solo al emitir hacia la GUI, descartando los frames sobrantes.
+        """
+        min_interval = 1.0 / self._fps
+        last_emit = 0.0
+        failures = 0
+        while self._running:
+            ok, frame = capture.read()
+            if not ok or frame is None:
+                failures += 1
+                if failures >= _MAX_READ_FAILURES:
+                    log.warning("Stream interrumpido; reintentando…")
+                    return
+                time.sleep(0.05)
+                continue
+            failures = 0
+            now = time.monotonic()
+            if now - last_emit < min_interval:
+                continue
+            last_emit = now
+            self.frame_ready.emit(_to_qimage(frame))
 
     def _open_capture(self) -> cv2.VideoCapture | None:
         os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = build_ffmpeg_options(
@@ -154,6 +198,7 @@ class VideoWidget(QWidget):
         self._fps = fps
         self._transport = transport
         self._thread: VideoStreamThread | None = None
+        self._stopping: list[VideoStreamThread] = []
         self._last_pixmap: QPixmap | None = None
 
         self._label = QLabel()
@@ -170,17 +215,35 @@ class VideoWidget(QWidget):
         """Arranca la captura del stream RTSP indicado."""
         self.stop()
         self._show_placeholder("Conectando con el stream…")
-        self._thread = VideoStreamThread(url, self._fps, self._transport, self)
+        self._thread = VideoStreamThread(url, self._fps, self._transport)
         self._thread.frame_ready.connect(self._show_frame)
         self._thread.stream_error.connect(self._on_stream_error)
         self._thread.start()
 
     def stop(self) -> None:
-        if self._thread is not None:
-            self._thread.stop()
-            self._thread.wait(timeout=2000)
-            self._thread = None
+        """Detiene la captura en curso sin bloquear la interfaz.
+
+        Si el hilo no termina enseguida (puede estar dentro de un
+        ``read()`` que agota su timeout), se le suelta pero se conserva la
+        referencia y se desconectan sus señales: así no sigue pintando
+        frames del stream anterior ni se destruye mientras corre.
+        """
+        thread = self._thread
+        self._thread = None
         self._last_pixmap = None
+        if thread is None:
+            return
+        thread.frame_ready.disconnect(self._show_frame)
+        thread.stream_error.disconnect(self._on_stream_error)
+        thread.stop()
+        if thread.wait(500):
+            return
+        self._stopping.append(thread)
+        thread.finished.connect(lambda: self._forget_thread(thread))
+
+    def _forget_thread(self, thread: VideoStreamThread) -> None:
+        if thread in self._stopping:
+            self._stopping.remove(thread)
 
     def show_placeholder(self, text: str) -> None:
         """Muestra un mensaje de relleno (p. ej. en modo simulación)."""

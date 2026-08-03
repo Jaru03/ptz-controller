@@ -56,7 +56,7 @@ class MockPTZController(PTZController):
         self._vtilt = 0.0
         self._vzoom = 0.0
         self._speed = 0.5
-        self._presets: dict[int, tuple[float, float, float, str]] = {}
+        self._presets: dict[str, tuple[float, float, float, str]] = {}
 
         self._connected = False
         self._thread: threading.Thread | None = None
@@ -135,56 +135,53 @@ class MockPTZController(PTZController):
         log.info("Home ejecutado en cámara simulada")
         self._notify()
 
-    def goto_preset(self, preset_id: int) -> None:
+    def goto_preset(self, token: str) -> None:
+        token = str(token)
         with self._lock:
-            if preset_id not in self._presets:
-                log.warning("Preset %s no existe en la cámara simulada", preset_id)
+            if token not in self._presets:
+                log.warning("Preset %s no existe en la cámara simulada", token)
                 return
-            pan, tilt, zoom, _ = self._presets[preset_id]
+            pan, tilt, zoom, _ = self._presets[token]
             self._pan, self._tilt, self._zoom = pan, tilt, zoom
             self._vpan = self._vtilt = self._vzoom = 0.0
-        log.info("GotoPreset %s ejecutado en cámara simulada", preset_id)
+        log.info("GotoPreset %s ejecutado en cámara simulada", token)
         self._notify()
 
-    def set_preset(self, preset_id: int, name: str = "") -> None:
+    def set_preset(self, token: str = "", name: str = "") -> None:
         with self._lock:
-            self._presets[preset_id] = (self._pan, self._tilt, self._zoom, name)
+            token = str(token) or self._next_token()
+            self._presets[token] = (self._pan, self._tilt, self._zoom, name)
         log.info(
             "SetPreset %s guardado en cámara simulada%s",
-            preset_id,
+            token,
             f" (nombre: {name})" if name else "",
         )
         self._notify()
 
-    def rename_preset(self, preset_id: int, name: str) -> None:
+    def rename_preset(self, token: str, name: str) -> None:
+        token = str(token)
         with self._lock:
-            if preset_id not in self._presets:
-                log.warning("Preset %s no existe en la cámara simulada", preset_id)
+            if token not in self._presets:
+                log.warning("Preset %s no existe en la cámara simulada", token)
                 return
-            pan, tilt, zoom, _ = self._presets[preset_id]
-            self._presets[preset_id] = (pan, tilt, zoom, name)
-        log.info("Preset %s renombrado a '%s' en cámara simulada", preset_id, name)
+            pan, tilt, zoom, _ = self._presets[token]
+            self._presets[token] = (pan, tilt, zoom, name)
+        log.info("Preset %s renombrado a '%s' en cámara simulada", token, name)
         self._notify()
 
-    def remove_preset(self, preset_id: int) -> None:
+    def remove_preset(self, token: str) -> None:
+        token = str(token)
         with self._lock:
-            removed = self._presets.pop(preset_id, None)
+            removed = self._presets.pop(token, None)
         if removed is None:
-            log.warning("Preset %s no existe en la cámara simulada", preset_id)
+            log.warning("Preset %s no existe en la cámara simulada", token)
             return
-        log.info("RemovePreset %s eliminado en cámara simulada", preset_id)
+        log.info("RemovePreset %s eliminado en cámara simulada", token)
         self._notify()
 
     def list_presets(self) -> list[PresetInfo]:
         with self._lock:
-            return [
-                PresetInfo(
-                    preset_id=preset_id,
-                    name=name or f"Preset {preset_id}",
-                    token=str(preset_id),
-                )
-                for preset_id, (*_, name) in sorted(self._presets.items())
-            ]
+            return list(self._preset_infos())
 
     def get_status(self) -> PTZStatus:
         with self._lock:
@@ -192,15 +189,26 @@ class MockPTZController(PTZController):
 
     # -- Internos ---------------------------------------------------------
 
-    def _build_status(self) -> PTZStatus:
-        presets = tuple(
-            PresetInfo(
-                preset_id=preset_id,
-                name=name or f"Preset {preset_id}",
-                token=str(preset_id),
+    def _next_token(self) -> str:
+        """Devuelve el menor token numérico libre (como haría una cámara)."""
+        used = {int(token) for token in self._presets if token.isdigit()}
+        candidate = 1
+        while candidate in used:
+            candidate += 1
+        return str(candidate)
+
+    def _preset_infos(self) -> tuple[PresetInfo, ...]:
+        """Presets ordenados igual que los devolvería una cámara real."""
+        return tuple(
+            PresetInfo(token=token, name=name or f"Preset {token}")
+            for token, (*_, name) in sorted(
+                self._presets.items(),
+                key=lambda item: (not item[0].isdigit(), _sort_key(item[0])),
             )
-            for preset_id, (*_, name) in sorted(self._presets.items())
         )
+
+    def _build_status(self) -> PTZStatus:
+        presets = self._preset_infos()
         return PTZStatus(
             connected=self._connected,
             pan=self._pan,
@@ -223,3 +231,8 @@ class MockPTZController(PTZController):
 
 def _clamp(value: float, minimum: float = -1.0, maximum: float = 1.0) -> float:
     return max(minimum, min(maximum, float(value)))
+
+
+def _sort_key(token: str) -> tuple[int, str]:
+    """Ordena los tokens numéricos por valor y el resto alfabéticamente."""
+    return (int(token), "") if token.isdigit() else (0, token)

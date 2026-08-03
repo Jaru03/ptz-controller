@@ -1,0 +1,157 @@
+name: Build
+
+# Construye el ejecutable autocontenido en cada plataforma. PyInstaller no
+# hace compilación cruzada, así que cada binario se genera en su propio
+# runner. Se lanza a mano o al publicar una etiqueta 'vX.Y.Z'.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Ejecutable (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: ptz-controller-linux-x86_64
+          - os: windows-latest
+            artifact: ptz-controller-windows-x86_64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install uv (Python 3.13)
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --group dev --group build
+
+      - name: Qt system deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1
+        shell: bash
+
+      - name: Build executable
+        run: uv run --group build python packaging/build.py --clean
+        shell: bash
+
+      # Comprobación de humo: el binario debe arrancar, crear su
+      # configuración en el directorio del usuario y cerrarse solo. Si
+      # faltara un WSDL o un módulo oculto, fallaría aquí.
+      - name: Smoke test (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          timeout 60 xvfb-run -a ./dist/ptz-controller --mock --no-joystick &
+          pid=$!
+          sleep 20
+          kill "$pid" 2>/dev/null || true
+          test -f "$HOME/.config/ptz-controller/config.yaml"
+          echo "El ejecutable arrancó y creó su configuración."
+        shell: bash
+
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $process = Start-Process -FilePath .\dist\ptz-controller.exe `
+            -ArgumentList '--mock','--no-joystick' -PassThru
+          Start-Sleep -Seconds 20
+          if ($process.HasExited -and $process.ExitCode -ne 0) {
+            throw "El ejecutable terminó con código $($process.ExitCode)"
+          }
+          Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          $config = Join-Path $env:APPDATA 'ptz-controller\config.yaml'
+          if (-not (Test-Path $config)) { throw "No se creó $config" }
+          Write-Host 'El ejecutable arrancó y creó su configuración.'
+        shell: pwsh
+
+      # Un único archivo por plataforma con el ejecutable y su instalador
+      # al lado. Los nombres deben ser distintos entre plataformas: una
+      # release de GitHub no admite dos assets con el mismo nombre.
+      - name: Empaquetar (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          mkdir -p "package/${{ matrix.artifact }}"
+          cp dist/ptz-controller packaging/install.sh packaging/icon.png \
+            "package/${{ matrix.artifact }}/"
+          chmod +x "package/${{ matrix.artifact }}/ptz-controller" \
+            "package/${{ matrix.artifact }}/install.sh"
+          tar -czf "${{ matrix.artifact }}.tar.gz" -C package "${{ matrix.artifact }}"
+        shell: bash
+
+      - name: Empaquetar (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          New-Item -ItemType Directory -Force -Path "package\${{ matrix.artifact }}" | Out-Null
+          Copy-Item dist\ptz-controller.exe, packaging\install.ps1 `
+            -Destination "package\${{ matrix.artifact }}"
+          Compress-Archive -Path "package\${{ matrix.artifact }}" `
+            -DestinationPath "${{ matrix.artifact }}.zip" -Force
+        shell: pwsh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}.tar.gz
+            ${{ matrix.artifact }}.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publicar release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Descargar artefactos
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Crear release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/**/*.zip
+          generate_release_notes: true
+          body: |
+            ## Instalación
+
+            No hace falta Python ni permisos de administrador.
+
+            **Linux**
+            ```bash
+            tar -xzf ptz-controller-linux-x86_64.tar.gz
+            cd ptz-controller-linux-x86_64
+            ./install.sh
+            ```
+
+            **Windows**: descomprima el `.zip` y ejecute
+            ```powershell
+            powershell -ExecutionPolicy Bypass -File install.ps1
+            ```
+
+            La configuración se crea al primer arranque en
+            `~/.config/ptz-controller/config.yaml` (Linux) o
+            `%APPDATA%\ptz-controller\config.yaml` (Windows): ahí van la IP,
+            el usuario y la contraseña de la cámara.

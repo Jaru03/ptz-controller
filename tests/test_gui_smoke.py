@@ -152,7 +152,7 @@ def test_presets_list_reflects_mock(qapp: QApplication) -> None:
     mock.connect()
     mock.move(0.4, 0.0, 0.0, 1.0)
     mock._advance(1.0)
-    mock.set_preset(1, "Entrada principal")
+    mock.set_preset("1", "Entrada principal")
     bus.publish("ptz.presets", mock.list_presets())
     _process(qapp)
     assert window._preset_list.count() == 1
@@ -167,15 +167,15 @@ def test_presets_rename_via_bus_updates_list(qapp: QApplication) -> None:
     bus, mock, window = _build_window(qapp)
     window.show()
     mock.connect()
-    mock.set_preset(1, "Entrada principal")
+    mock.set_preset("1", "Entrada principal")
     bus.publish("ptz.presets", mock.list_presets())
     _process(qapp)
 
     bus.subscribe(
         "command.renamePreset",
-        lambda cmd: mock.rename_preset(cmd.preset_id, cmd.name),
+        lambda cmd: mock.rename_preset(cmd.token, cmd.name),
     )
-    bus.send(RenamePresetCommand(preset_id=1, name="Patio trasero"))
+    bus.send(RenamePresetCommand(token="1", name="Patio trasero"))
     bus.publish("ptz.presets", mock.list_presets())
     _process(qapp)
     assert window._preset_list.count() == 1

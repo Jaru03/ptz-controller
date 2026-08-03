@@ -79,25 +79,25 @@ def test_presets_roundtrip() -> None:
     mock.connect()
     mock.move(pan=0.4, tilt=-0.3, zoom=0.1, speed=1.0)
     mock._advance(1.0)
-    mock.set_preset(1)
-    assert [p.preset_id for p in mock.list_presets()] == [1]
+    mock.set_preset("1")
+    assert [p.token for p in mock.list_presets()] == ["1"]
 
     mock.move(pan=-1.0, tilt=0.0, zoom=0.0, speed=1.0)
     mock._advance(1.0)
-    mock.goto_preset(1)
+    mock.goto_preset("1")
     status = mock.get_status()
     assert status.pan == 0.4
     assert status.tilt == -0.3
     assert status.zoom == 0.1
 
-    mock.remove_preset(1)
+    mock.remove_preset("1")
     assert mock.list_presets() == []
 
 
 def test_goto_missing_preset_is_noop() -> None:
     mock = MockPTZController()
     mock.connect()
-    mock.goto_preset(99)
+    mock.goto_preset("99")
     assert mock.get_status().pan == 0.0
 
 
@@ -106,30 +106,46 @@ def test_set_preset_with_name_and_rename() -> None:
     mock.connect()
     mock.move(pan=0.4, tilt=0.0, zoom=0.0, speed=1.0)
     mock._advance(1.0)
-    mock.set_preset(1, "Entrada principal")
+    mock.set_preset("1", "Entrada principal")
     presets = mock.list_presets()
     assert presets[0].name == "Entrada principal"
 
-    mock.rename_preset(1, "Patio")
+    mock.rename_preset("1", "Patio")
     assert mock.list_presets()[0].name == "Patio"
-    mock.goto_preset(1)
+    mock.goto_preset("1")
     assert mock.get_status().pan == 0.4
 
-    mock.rename_preset(99, "Fantasma")
-    assert mock.list_presets() == [p for p in mock.list_presets() if p.preset_id != 99]
+    mock.rename_preset("99", "Fantasma")
+    assert [p.token for p in mock.list_presets()] == ["1"]
 
 
 def test_preset_default_name_when_unnamed() -> None:
     mock = MockPTZController()
     mock.connect()
-    mock.set_preset(3)
+    mock.set_preset("3")
     assert mock.list_presets()[0].name == "Preset 3"
+
+
+def test_set_preset_without_token_assigns_the_next_free_one() -> None:
+    mock = MockPTZController()
+    mock.connect()
+    mock.set_preset(name="Primera")
+    mock.set_preset(name="Segunda")
+    assert [p.token for p in mock.list_presets()] == ["1", "2"]
+
+
+def test_presets_keep_non_numeric_tokens() -> None:
+    mock = MockPTZController()
+    mock.connect()
+    mock.set_preset("PresetA", "Patio")
+    mock.goto_preset("PresetA")
+    assert [p.token for p in mock.list_presets()] == ["PresetA"]
 
 
 def test_preset_name_survives_status() -> None:
     mock = MockPTZController()
     mock.connect()
-    mock.set_preset(1, "Escena A")
+    mock.set_preset("1", "Escena A")
     status = mock.get_status()
     assert status.presets[0].name == "Escena A"
 

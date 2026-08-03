@@ -2,6 +2,9 @@
 
 import logging
 import os
+import time
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from gui.video_widget import (
     VideoStreamThread,
@@ -11,21 +14,37 @@ from gui.video_widget import (
 from utils.logger import APP_LOGGER_NAME
 
 
+def _options(transport: str) -> dict[str, str]:
+    return dict(
+        part.split(";", 1) for part in build_ffmpeg_options(transport).split("|")
+    )
+
+
 def test_ffmpeg_options_default_to_tcp() -> None:
-    opts = build_ffmpeg_options("tcp")
-    assert "rtsp_transport;tcp" in opts
-    assert "stimeout;" in opts
-    assert "|" in opts
+    options = _options("tcp")
+    assert options["rtsp_transport"] == "tcp"
+    assert options["reorder_queue_size"] == "0"
 
 
-def test_ffmpeg_options_udp_only_transport() -> None:
-    opts = build_ffmpeg_options("udp")
-    assert opts == "rtsp_transport;udp"
+def test_ffmpeg_options_keep_transport_for_udp() -> None:
+    options = _options("udp")
+    assert options["rtsp_transport"] == "udp"
+    assert "reorder_queue_size" not in options
 
 
-def test_ffmpeg_options_allow_multiple_parsers() -> None:
-    parts = build_ffmpeg_options("tcp").split("|")
-    assert {p.split(";")[0] for p in parts} >= {"rtsp_transport", "stimeout"}
+def test_ffmpeg_options_set_socket_timeout_under_both_names() -> None:
+    # FFmpeg renombró 'stimeout' a 'timeout' en la versión 5 y cada rueda
+    # de opencv-python trae la suya: sin timeout, read() puede bloquearse
+    # para siempre y el stream nunca se reconecta.
+    options = _options("tcp")
+    assert options["timeout"] == options["stimeout"] != "0"
+
+
+def test_ffmpeg_options_are_parseable_pairs() -> None:
+    for transport in ("tcp", "udp"):
+        for part in build_ffmpeg_options(transport).split("|"):
+            assert part.count(";") == 1
+            assert all(part.split(";"))
 
 
 def test_ffmpeg_loglevel_silenced_outside_debug(monkeypatch) -> None:
@@ -54,5 +73,58 @@ def test_open_capture_sets_ffmpeg_options(monkeypatch) -> None:
     thread = VideoStreamThread("rtsp://cam/stream", transport="udp")
     thread._open_capture()
     assert opened == ["rtsp://cam/stream"]
-    assert os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] == "rtsp_transport;udp"
+    assert os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] == build_ffmpeg_options("udp")
     assert "OPENCV_FFMPEG_LOGLEVEL" in os.environ
+
+
+def test_consume_does_not_throttle_reads(monkeypatch) -> None:
+    """Se debe leer sin pausas: dormir entre lecturas llena el búfer RTSP."""
+    import numpy
+
+    frames = 40
+
+    class FakeCapture:
+        def __init__(self) -> None:
+            self.reads = 0
+
+        def read(self):
+            self.reads += 1
+            if self.reads > frames:
+                return False, None
+            return True, numpy.zeros((4, 4, 3), dtype=numpy.uint8)
+
+    thread = VideoStreamThread("rtsp://cam/stream", fps=1)
+    thread._running = True
+    emitted: list[object] = []
+    thread.frame_ready.connect(emitted.append)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+
+    capture = FakeCapture()
+    thread._consume(capture)
+
+    assert capture.reads > frames  # se leyeron todos los frames disponibles
+    assert len(emitted) <= 2  # pero a la GUI solo va el ritmo de fps
+
+
+def test_consume_tolerates_transient_read_failures(monkeypatch) -> None:
+    import numpy
+
+    results = [
+        (False, None),
+        (True, numpy.zeros((4, 4, 3), dtype=numpy.uint8)),
+        (False, None),
+        (False, None),
+        (False, None),
+    ]
+
+    class FakeCapture:
+        def read(self):
+            return results.pop(0)
+
+    thread = VideoStreamThread("rtsp://cam/stream", fps=30)
+    thread._running = True
+    thread.frame_ready.connect(lambda _image: None)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+
+    thread._consume(FakeCapture())
+    assert results == []  # un fallo aislado no corta el stream; tres seguidos sí

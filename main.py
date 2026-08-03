@@ -11,28 +11,31 @@ través del bus de eventos. Uso:
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
 from pathlib import Path
+from typing import Callable
 
 from PySide6.QtWidgets import QApplication
 
 from camera.ptz_controller import OnvifPTZController, PTZController
 from camera.mock_ptz import MockPTZController
 from config.settings import Settings
-from controllers.base import MovementState
+from controllers.base import MovementState, PresetRegistry
 from controllers.joystick_controller import JoystickController
 from controllers.keyboard_controller import create_keyboard_controller
 from controllers.pygame_events import PyGameEventBroker
+from core.command_worker import CommandWorker
 from core.event_bus import EventBus
 from core.ref import Ref
 from gui.main_window import MainWindow
 from models.commands import PTZStatus
 from utils.logger import attach_gui_handler, get_logger, setup_logging
+from utils.paths import bundled_file, default_config_path, default_log_dir
 
 log = get_logger(__name__)
 
-PROJECT_ROOT = Path(__file__).resolve().parent
-DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.yaml"
+DEFAULT_CONFIG_PATH = default_config_path()
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -70,6 +73,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def prepare_config(path: Path) -> Settings:
+    """Carga la configuración, creándola la primera vez si no existe.
+
+    Si el programa lleva empaquetado un ``config.yaml.example`` se usa
+    como plantilla: así el usuario encuentra el archivo comentado en vez
+    de un volcado de valores por defecto.
+    """
+    if not path.exists():
+        template = bundled_file("config.yaml.example")
+        if template is not None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(template, path)
+            log.info("Configuración inicial creada en %s", path)
+    return Settings.ensure_default_config(path)
+
+
 def create_ptz_controller(settings: Settings, mock: bool) -> PTZController:
     """Crea el controlador PTZ según el modo elegido."""
     camera = settings.camera
@@ -87,6 +106,8 @@ def create_ptz_controller(settings: Settings, mock: bool) -> PTZController:
         port=camera.port,
         username=camera.username,
         password=camera.password,
+        zoom_mode=settings.movement.zoom_mode,
+        zoom_step=settings.movement.zoom_step,
     )
     log.info("Modo cámara real (ONVIF) configurado para %s:%s", camera.ip, camera.port)
     return controller
@@ -96,12 +117,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
     config_path = Path(args.config)
-    settings = Settings.ensure_default_config(config_path)
+    settings = prepare_config(config_path)
     for warning in settings.validate():
         log.warning("Configuración: %s", warning)
 
     level = args.log_level or settings.logging.level
-    setup_logging(level=level, log_dir=settings.logging.directory)
+    setup_logging(level=level, log_dir=default_log_dir(settings.logging.directory))
 
     mock = args.mock or (settings.camera.mock and not args.real)
 
@@ -117,33 +138,60 @@ def main(argv: list[str] | None = None) -> int:
 
     # -- Entrada ----------------------------------------------------------
 
-    keyboard = create_keyboard_controller(settings.keyboard, movement, bus)
+    presets = PresetRegistry(bus)
+    keyboard = create_keyboard_controller(settings.keyboard, movement, bus, presets)
 
     broker = PyGameEventBroker(poll_rate=settings.joystick.poll_rate)
     joystick: JoystickController | None = None
     if not args.no_joystick:
-        joystick = JoystickController(settings.joystick, broker, movement, bus)
+        joystick = JoystickController(
+            settings.joystick, broker, movement, bus, presets=presets
+        )
         broker.start()
         joystick.start()
 
     # -- Enrutado de comandos ---------------------------------------------
+    #
+    # Todo el trabajo de la cámara (peticiones SOAP por red) se ejecuta en
+    # el hilo del worker: si se hiciera en el hilo que publica el comando
+    # bloquearía la GUI, que es quien recibe las teclas y pinta el vídeo.
+
+    worker = CommandWorker()
+    worker.start()
+
+    def publish_status() -> None:
+        bus.publish("ptz.status", ref.value.get_status())
+
+    def publish_presets() -> None:
+        bus.publish("ptz.presets", ref.value.list_presets())
+
+    def publish_stream_uri() -> None:
+        url = settings.camera.rtsp_url.strip() or ref.value.stream_uri()
+        bus.publish("ptz.stream", url)
+
+    def with_presets(action: Callable[[], None]) -> Callable[[], None]:
+        """Envuelve una acción sobre presets para republicar la lista."""
+
+        def job() -> None:
+            action()
+            publish_presets()
+
+        return job
 
     def handle_connect() -> None:
         try:
             ref.value.disconnect()
         except Exception:  # noqa: BLE001 - conexión previa inexistente
             pass
-        if mock:
-            ref.value = create_ptz_controller(settings, mock=True)
-        else:
-            ref.value = create_ptz_controller(settings, mock=False)
+        ref.value = create_ptz_controller(settings, mock=mock)
         try:
             ref.value.connect()
         except Exception as exc:  # noqa: BLE001 - errores de conexión variados
             log.error("No se pudo conectar: %s", exc)
             bus.publish("gui.error", f"No se pudo conectar con la cámara:\n{exc}")
-        bus.publish("ptz.status", ref.value.get_status())
-        bus.publish("ptz.presets", ref.value.list_presets())
+        publish_status()
+        publish_presets()
+        publish_stream_uri()
 
     def handle_disconnect() -> None:
         ref.value.stop()
@@ -151,29 +199,47 @@ def main(argv: list[str] | None = None) -> int:
             ref.value.disconnect()
         except Exception as exc:  # noqa: BLE001
             log.error("Error al desconectar: %s", exc)
-        bus.publish("ptz.status", ref.value.get_status())
+        publish_status()
         bus.publish("ptz.presets", [])
+        bus.publish("ptz.stream", "")
 
-    bus.subscribe("command.connect", lambda _cmd: handle_connect())
-    bus.subscribe("command.disconnect", lambda _cmd: handle_disconnect())
+    bus.subscribe("command.connect", lambda _cmd: worker.submit(handle_connect))
+    bus.subscribe("command.disconnect", lambda _cmd: worker.submit(handle_disconnect))
     bus.subscribe(
         "command.move",
-        lambda cmd: ref.value.move(cmd.pan, cmd.tilt, cmd.zoom, cmd.speed),
-    )
-    bus.subscribe("command.stop", lambda _cmd: ref.value.stop())
-    bus.subscribe("command.home", lambda _cmd: ref.value.home())
-    bus.subscribe(
-        "command.gotoPreset", lambda cmd: ref.value.goto_preset(cmd.preset_id)
+        lambda cmd: worker.submit(
+            lambda: ref.value.move(cmd.pan, cmd.tilt, cmd.zoom, cmd.speed),
+            key="move",
+        ),
     )
     bus.subscribe(
-        "command.setPreset", lambda cmd: ref.value.set_preset(cmd.preset_id, cmd.name)
+        "command.stop",
+        lambda _cmd: worker.submit(
+            lambda: ref.value.stop(), key="stop", cancels=("move",)
+        ),
+    )
+    bus.subscribe("command.home", lambda _cmd: worker.submit(lambda: ref.value.home()))
+    bus.subscribe(
+        "command.gotoPreset",
+        lambda cmd: worker.submit(lambda: ref.value.goto_preset(cmd.token)),
+    )
+    bus.subscribe(
+        "command.setPreset",
+        lambda cmd: worker.submit(
+            with_presets(lambda: ref.value.set_preset(cmd.token, cmd.name))
+        ),
     )
     bus.subscribe(
         "command.renamePreset",
-        lambda cmd: ref.value.rename_preset(cmd.preset_id, cmd.name),
+        lambda cmd: worker.submit(
+            with_presets(lambda: ref.value.rename_preset(cmd.token, cmd.name))
+        ),
     )
     bus.subscribe(
-        "command.removePreset", lambda cmd: ref.value.remove_preset(cmd.preset_id)
+        "command.removePreset",
+        lambda cmd: worker.submit(
+            with_presets(lambda: ref.value.remove_preset(cmd.token))
+        ),
     )
     bus.subscribe("command.setSpeed", lambda cmd: movement.set_speed(cmd.speed))
 
@@ -190,6 +256,7 @@ def main(argv: list[str] | None = None) -> int:
         keyboard_controller=keyboard,
         config_path=str(config_path),
         poll_interval_ms=poll_interval,
+        poll_status=lambda: worker.submit(publish_status, key="status"),
     )
     attach_gui_handler(log, window.append_log)
     window.show()
@@ -208,6 +275,7 @@ def main(argv: list[str] | None = None) -> int:
         if joystick is not None:
             joystick.stop()
         broker.stop()
+        worker.stop()
         try:
             ref.value.stop()
             ref.value.disconnect()

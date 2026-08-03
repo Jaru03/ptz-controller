@@ -4,6 +4,7 @@ from models.commands import (
     GotoPresetCommand,
     HomeCommand,
     MoveCommand,
+    PresetInfo,
     RenamePresetCommand,
     SetPresetCommand,
     SetSpeedCommand,
@@ -54,11 +55,16 @@ def test_commands_are_frozen() -> None:
 
 
 def test_set_preset_command_carries_name() -> None:
-    command = SetPresetCommand(preset_id=7, name="Patio")
-    assert command.preset_id == 7
+    command = SetPresetCommand(token="7", name="Patio")
+    assert command.token == "7"
     assert command.name == "Patio"
 
 
 def test_rename_preset_command_defaults() -> None:
-    assert RenamePresetCommand(preset_id=2, name="Salón").name == "Salón"
-    assert RenamePresetCommand().preset_id == 0
+    assert RenamePresetCommand(token="2", name="Salón").name == "Salón"
+    assert RenamePresetCommand().token == ""
+
+
+def test_preset_commands_accept_non_numeric_tokens() -> None:
+    assert GotoPresetCommand(token="PresetEntrada").token == "PresetEntrada"
+    assert PresetInfo(token="a1b2", name="Patio").token == "a1b2"
