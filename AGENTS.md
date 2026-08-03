@@ -62,9 +62,37 @@ que `main.py` enruta todos los comandos de cámara al `CommandWorker`.
 
 ## Estado del repositorio
 
-Sin cambios pendientes al inicio de la sesión actual; el trabajo previo
-(vídeo RTSP por TCP, presets por token, reenvío periódico de movimiento)
-ya está commiteado. **No commitear sin que el usuario lo pida.**
+`master` en `bc25718` (merge del PR #1), sin cambios pendientes. Todo el
+trabajo descrito más abajo está commiteado y publicado.
+**No commitear sin que el usuario lo pida.**
+
+### Release v0.1.0 (2026-08-03)
+
+Primera versión publicada:
+<https://github.com/Jaru03/ptz-controller/releases/tag/v0.1.0>
+
+- `ptz-controller-linux-x86_64.tar.gz` (169 MB) — binario + `install.sh`
+  + icono.
+- `ptz-controller-windows-x86_64.zip` (113 MB) — `.exe` + `install.ps1`.
+- Release pública, ni borrador ni prerelease.
+
+Commits de la versión:
+
+- `57359fd` fix: estabilidad de vídeo, presets por token, pad numérico y
+  zoom por pasos.
+- `7ab322b` feat: instalador y ejecutable autocontenido.
+
+Verificado en CI (Linux y Windows en verde, tanto `CI` como `Build`) y a
+mano: descarga del `.tar.gz` publicado, extracción fuera del repo,
+`install.sh`, arranque desde `~/.local/bin` y creación de la
+configuración en `~/.config/ptz-controller/`. La prueba de humo del
+runner de Windows confirma que el `.exe` arranca y crea su configuración
+en `%APPDATA%`.
+
+La siguiente versión solo necesita: mergear a `master`, comprobar que el
+workflow `Build` pasa (lanzándolo con `workflow_dispatch`) y etiquetar
+`vX.Y.Z`. Mantener `version` de `pyproject.toml` alineada con la
+etiqueta.
 
 ---
 
@@ -278,19 +306,35 @@ Para publicar: `git tag vX.Y.Z && git push origin vX.Y.Z`. Solo el push
 de una etiqueta `v*` dispara el job `release`; `workflow_dispatch` deja
 los artefactos en la pestaña Actions (30 días, requieren sesión).
 
+**Gotcha**: GitHub solo permite `workflow_dispatch` de workflows que ya
+están en la **rama por defecto**. Lanzarlo desde una rama devuelve
+`HTTP 404: workflow build.yml not found on the default branch`, así que
+no se puede validar el build de Windows antes de mergear: primero se
+mergea, luego se lanza a mano, y solo entonces se etiqueta (para no
+dejar una etiqueta publicada con una release a medias).
+
 Los iconos se generan del SVG con `packaging/make_icons.py` (Qt para
 rasterizar y un contenedor ICO escrito a mano, sin Pillow). Al rasterizar
 con Qt, el `QByteArray` debe sobrevivir al `QBuffer` o el proceso peta.
 
 ### Pendiente de confirmar en hardware
 
-Los cambios de esta sesión (worker, timeouts, `_consume` sin pausas, hilo
-de vídeo duplicado, zoom por pasos, presets por posición y pad numérico)
-están cubiertos por tests pero **no probados aún contra la cámara real**.
-Si el zoom por pasos resulta demasiado brusco o lento, ajustar
-`movement.zoom_step` / `movement.repeat_interval_ms`; si la cámara acepta
-`RelativeMove` pero no hace nada visible, poner
-`movement.zoom_mode: continuous`.
+Publicado en v0.1.0 pero **no probado aún contra la cámara real**: worker,
+timeouts, `_consume` sin pausas, hilo de vídeo duplicado, zoom por pasos,
+presets por posición y pad numérico. Todo está cubierto por tests y por
+el arranque del binario, que no es lo mismo. Orden sugerido al probarlo:
+
+1. Reconectar varias veces seguidas y ver si el vídeo aguanta (era el
+   bug de los hilos de captura acumulados).
+2. Zoom E/Q: comprobar que para en posiciones intermedias. Si va brusco o
+   lento, ajustar `movement.zoom_step` / `movement.repeat_interval_ms`;
+   si la cámara acepta `RelativeMove` pero no se mueve nada,
+   `movement.zoom_mode: continuous`.
+3. Teclas 4-9 y pad numérico contra las escenas de la cámara.
+
+Con el ejecutable instalado, el log está en
+`~/.config/ptz-controller/logs/ptz-controller.log`; con `--log-level
+DEBUG` se ven los `ContinuousMove` / `RelativeMove` que salen.
 
 ## Convenciones a respetar
 
