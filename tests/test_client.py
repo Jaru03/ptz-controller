@@ -99,6 +99,28 @@ def test_continuous_move_stops_the_axis_that_became_inactive() -> None:
     assert stops[-1]["PanTilt"] is False
 
 
+def test_stop_sends_one_request_per_axis_when_both_are_requested() -> None:
+    """Algunas cámaras solo atienden un eje en un Stop combinado."""
+    stops: list[dict] = []
+    client = _client_with_ptz(Stop=lambda self, request: stops.append(request))
+
+    client.stop()  # ambos ejes (por defecto)
+
+    assert stops == [
+        {"ProfileToken": "profile-0", "PanTilt": True, "Zoom": False},
+        {"ProfileToken": "profile-0", "PanTilt": False, "Zoom": True},
+    ]
+
+
+def test_stop_sends_a_single_request_for_one_axis() -> None:
+    stops: list[dict] = []
+    client = _client_with_ptz(Stop=lambda self, request: stops.append(request))
+
+    client.stop(pan_tilt=False, zoom=True)
+
+    assert stops == [{"ProfileToken": "profile-0", "PanTilt": False, "Zoom": True}]
+
+
 def test_relative_move_omits_empty_axes() -> None:
     sent: list[dict] = []
     client = _client_with_ptz(

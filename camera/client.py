@@ -229,10 +229,29 @@ class OnvifClient:
         self._moving_zoom = "Zoom" in velocity
 
     def stop(self, pan_tilt: bool = True, zoom: bool = True) -> None:
-        """Detiene el movimiento de los ejes indicados (Stop)."""
+        """Detiene el movimiento de los ejes indicados (Stop).
+
+        Cuando se piden ambos ejes a la vez se envían como dos peticiones
+        ``Stop`` separadas en lugar de una combinada: algunas cámaras solo
+        atienden uno de los dos flags en un ``Stop`` con ``PanTilt`` y
+        ``Zoom`` a la vez (normalmente PanTilt) y el zoom se queda en
+        marcha. Pedir un único eje (como hace ``stop_inactive_axes``) sigue
+        enviando una sola petición, sin cambios.
+        """
         self._require_ptz()
         if not pan_tilt and not zoom:
             return
+        if pan_tilt and zoom:
+            self._send_stop(pan_tilt=True, zoom=False)
+            self._send_stop(pan_tilt=False, zoom=True)
+        else:
+            self._send_stop(pan_tilt=pan_tilt, zoom=zoom)
+        if pan_tilt:
+            self._moving_pan_tilt = False
+        if zoom:
+            self._moving_zoom = False
+
+    def _send_stop(self, pan_tilt: bool, zoom: bool) -> None:
         try:
             self._ptz.Stop(
                 {
@@ -241,12 +260,9 @@ class OnvifClient:
                     "Zoom": zoom,
                 }
             )
+            log.debug("Stop enviado: PanTilt=%s Zoom=%s", pan_tilt, zoom)
         except Exception as exc:  # noqa: BLE001
             raise CameraError(f"Stop falló: {exc}") from exc
-        if pan_tilt:
-            self._moving_pan_tilt = False
-        if zoom:
-            self._moving_zoom = False
 
     def stop_inactive_axes(self, pan_tilt: bool, zoom: bool) -> None:
         """Detiene los ejes que estaban en marcha y ya no se envían.
