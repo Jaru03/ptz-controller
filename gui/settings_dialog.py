@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -19,6 +20,13 @@ from PySide6.QtWidgets import (
 )
 
 from config.settings import Settings
+
+_ZOOM_MODES = ("continuous", "step", "auto")
+_ZOOM_MODE_LABELS = {
+    "continuous": "Continuo (recomendado, compatible con casi cualquier cámara)",
+    "step": "A saltos (para intermedio, puede no mover el zoom en algunas cámaras)",
+    "auto": "Automático (a saltos, y si falla con error, continuo)",
+}
 
 
 class SettingsDialog(QDialog):
@@ -61,9 +69,18 @@ class SettingsDialog(QDialog):
         self._deadzone.setRange(0.0, 0.5)
         self._deadzone.setSingleStep(0.01)
         self._deadzone.setValue(movement.deadzone)
+        self._zoom_mode = QComboBox()
+        for mode in _ZOOM_MODES:
+            self._zoom_mode.addItem(_ZOOM_MODE_LABELS[mode], mode)
+        if movement.zoom_mode in _ZOOM_MODES:
+            self._zoom_mode.setCurrentIndex(_ZOOM_MODES.index(movement.zoom_mode))
+        self._zoom_mode.setToolTip(
+            "Si el zoom no se mueve con la cámara real, pruebe 'Continuo'."
+        )
 
         form.addRow("Velocidad:", self._speed)
         form.addRow("Zona muerta:", self._deadzone)
+        form.addRow("Modo de zoom:", self._zoom_mode)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -87,4 +104,5 @@ class SettingsDialog(QDialog):
         settings.camera.mock = self._mock.isChecked()
         settings.movement.speed = self._speed.value()
         settings.movement.deadzone = self._deadzone.value()
+        settings.movement.zoom_mode = self._zoom_mode.currentData()
         return settings

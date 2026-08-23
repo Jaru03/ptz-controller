@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 from typing import Callable
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QDialog
 
 from camera.ptz_controller import OnvifPTZController, PTZController
 from camera.mock_ptz import MockPTZController
@@ -28,9 +28,10 @@ from controllers.pygame_events import PyGameEventBroker
 from core.command_worker import CommandWorker
 from core.event_bus import EventBus
 from core.ref import Ref
+from gui.connection_dialog import ConnectionDialog
 from gui.main_window import MainWindow
-from models.commands import PTZStatus
-from utils.logger import attach_gui_handler, get_logger, setup_logging
+from models.commands import ConnectCommand, PTZStatus
+from utils.logger import get_logger, setup_logging
 from utils.paths import bundled_file, default_config_path, default_log_dir
 
 log = get_logger(__name__)
@@ -264,6 +265,18 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication(sys.argv[:1])
     app.setApplicationName("ptz-controller")
 
+    connection_dialog = ConnectionDialog(settings)
+    if connection_dialog.exec() != QDialog.DialogCode.Accepted:
+        log.info("Conexión cancelada por el usuario; cerrando aplicación")
+        keyboard.stop()
+        if joystick is not None:
+            joystick.stop()
+        broker.stop()
+        worker.stop()
+        return 0
+    connection_dialog.apply_to_settings()
+    mock = resolve_mock(args, settings)
+
     poll_interval = settings.gui.poll_interval_ms if mock else 500
     window = MainWindow(
         controller_ref=ref,
@@ -274,9 +287,9 @@ def main(argv: list[str] | None = None) -> int:
         poll_interval_ms=poll_interval,
         poll_status=lambda: worker.submit(publish_status, key="status"),
     )
-    attach_gui_handler(log, window.append_log)
     window.show()
     log.info("Aplicación iniciada (modo: %s)", "mock" if mock else "real")
+    bus.send(ConnectCommand())
 
     # -- Cierre ordenado --------------------------------------------------
 

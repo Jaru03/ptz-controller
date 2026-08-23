@@ -38,19 +38,23 @@ class MovementConfig:
     """Comportamiento del movimiento PTZ.
 
     ``zoom_mode`` decide cómo se traduce el eje de zoom a ONVIF:
+      - 'continuous': ``ContinuousMove`` + ``Stop`` (como el pan/tilt). Es
+        el modo por defecto: lo soportan prácticamente todas las cámaras.
       - 'step': cada repetición envía un ``RelativeMove`` de ``zoom_step``,
         de modo que el zoom avanza a saltos y se puede parar en puntos
-        intermedios aunque el firmware ignore el ``Stop`` del zoom.
-      - 'continuous': ``ContinuousMove`` + ``Stop`` (como el pan/tilt).
-      - 'auto': intenta 'step' y cae a 'continuous' si la cámara rechaza
-        el ``RelativeMove``.
+        intermedios. Algunas cámaras aceptan el ``RelativeMove`` de zoom
+        sin dar error pero sin moverlo realmente; si el zoom deja de
+        responder con este modo, vuelva a 'continuous'.
+      - 'auto': intenta 'step' y cae a 'continuous' solo si la cámara
+        rechaza el ``RelativeMove`` con un error (no detecta el caso
+        anterior, en el que la cámara lo acepta pero no mueve el zoom).
     """
 
     speed: float = 0.5
     speeds: list[float] = field(default_factory=lambda: [0.2, 0.5, 0.8])
     deadzone: float = 0.08
     repeat_interval_ms: int = 150
-    zoom_mode: str = "auto"
+    zoom_mode: str = "continuous"
     zoom_step: float = 0.06
 
 

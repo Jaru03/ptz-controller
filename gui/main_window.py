@@ -103,7 +103,6 @@ class QtEventBridge(QObject):
     discovery_done = Signal()
     error = Signal(str)
     quit_request = Signal(object)
-    log_message = Signal(str)
 
     def __init__(self, bus: EventBus) -> None:
         super().__init__()
@@ -195,7 +194,6 @@ class MainWindow(QMainWindow):
         splitter.setSizes([620, 380])
         root.addWidget(splitter, 1)
 
-        root.addWidget(self._build_log_panel())
         central.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         central.setFocus()
         self.setCentralWidget(central)
@@ -305,21 +303,6 @@ class MainWindow(QMainWindow):
         layout.addLayout(buttons)
         return group
 
-    def _build_log_panel(self) -> QGroupBox:
-        group = QGroupBox("Logs")
-        layout = QVBoxLayout(group)
-        layout.setContentsMargins(4, 4, 4, 4)
-
-        self._log_edit = QPlainTextEdit()
-        self._log_edit.setReadOnly(True)
-        self._log_edit.setMaximumBlockCount(5000)
-        self._log_edit.setStyleSheet(
-            "background-color: #15151f; color: #cdd6f4; font-family: monospace;"
-        )
-        layout.addWidget(self._log_edit)
-        group.setMaximumHeight(220)
-        return group
-
     # -- Puente de eventos ------------------------------------------------
 
     def _wire_bridge(self) -> None:
@@ -334,7 +317,6 @@ class MainWindow(QMainWindow):
         bridge.discovery_done.connect(self._on_discovery_done)
         bridge.error.connect(self._on_gui_error)
         bridge.quit_request.connect(self.close)
-        bridge.log_message.connect(self._append_log)
 
     # -- Slots de estado --------------------------------------------------
 
@@ -591,15 +573,6 @@ class MainWindow(QMainWindow):
         self._pass_field.setText(camera.password)
         self._mock_check.setChecked(camera.mock)
         self._on_speed_command(SimpleNamespace(speed=self._settings.movement.speed))
-
-    # -- Logs -------------------------------------------------------------
-
-    def append_log(self, message: str) -> None:
-        """Punto de entrada para el handler de logging (cualquier hilo)."""
-        self._bridge.log_message.emit(message)
-
-    def _append_log(self, message: str) -> None:
-        self._log_edit.appendPlainText(message)
 
     # -- Teclado ----------------------------------------------------------
 

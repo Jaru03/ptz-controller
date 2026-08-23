@@ -27,13 +27,15 @@ movement:
     # tras recibir un único comando y no llegar otro paquete.
     repeat_interval_ms: 150
     # Cómo se controla el zoom (E/Q):
+    #   continuous: ContinuousMove + Stop, igual que el pan/tilt. Por
+    #               defecto: lo soportan prácticamente todas las cámaras.
     #   step:       RelativeMove de zoom_step por repetición. El zoom
-    #               avanza a saltos y para en posiciones intermedias
-    #               aunque la cámara ignore el Stop del eje de zoom.
-    #   continuous: ContinuousMove + Stop, igual que el pan/tilt.
-    #   auto:       intenta 'step' y cae a 'continuous' si la cámara
-    #               rechaza el RelativeMove.
-    zoom_mode: auto
+    #               avanza a saltos y para en posiciones intermedias, pero
+    #               algunas cámaras aceptan el RelativeMove sin dar error
+    #               y sin mover el zoom realmente.
+    #   auto:       intenta 'step' y cae a 'continuous' solo si la cámara
+    #               rechaza el RelativeMove con un error.
+    zoom_mode: continuous
     zoom_step: 0.06
 
 keyboard:

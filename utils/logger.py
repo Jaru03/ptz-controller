@@ -74,30 +74,3 @@ def setup_logging(
         logger.warning("No se pudo crear el archivo de logs: %s", exc)
 
     return logger
-
-
-class GuiLogHandler(logging.Handler):
-    """Handler de logging que reenvía registros a un callback (p. ej. la GUI).
-
-    Permite volcar los logs de toda la aplicación al panel de logs de la
-    interfaz sin acoplar ``logging`` a PySide6.
-    """
-
-    def __init__(self, emit_callback: object) -> None:
-        super().__init__()
-        self._emit_callback = emit_callback
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            message = self.format(record)
-            self._emit_callback(message)
-        except Exception:  # noqa: BLE001 - nunca romper el logging
-            self.handleError(record)
-
-
-def attach_gui_handler(logger: logging.Logger, emit_callback: object) -> GuiLogHandler:
-    """Añade un handler que reenvía los registros a la interfaz gráfica."""
-    handler = GuiLogHandler(emit_callback)
-    handler.setFormatter(logging.Formatter("%(levelname)-8s | %(message)s"))
-    logger.addHandler(handler)
-    return handler
