@@ -1,20 +1,23 @@
-"""Vista previa RTSP de la cámara mediante OpenCV.
+"""Captura de vídeo RTSP en un hilo dedicado, sin dependencias de GUI.
 
-Captura el stream en un hilo dedicado (``VideoStreamThread``) y convierte
-cada frame a ``QImage`` para mostrarlo en un ``QLabel``. Si el stream no
-está disponible (modo simulación) se muestra un texto de relleno.
+Reubicado desde ``gui/video_widget.py`` (PySide6): la lógica de
+captura/reconexión/FFmpeg es la misma, solo cambia el mecanismo de
+entrega de frames — antes señales Qt (``QThread``/``Signal``), ahora
+callables planos — para que sea reutilizable tanto por
+``gui/video_widget.py`` (adapta los callables a señales Qt con un
+pequeño puente) como por ``gui_web/video_controller.py`` (los codifica a
+JPEG para el servidor MJPEG).
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
+from typing import Any, Callable
 
 import cv2
-from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from utils.logger import get_app_log_level, get_logger
 
@@ -26,6 +29,7 @@ _STREAM_TIMEOUT_US = 5_000_000  # timeout de socket de FFmpeg: 5 s (microsegundo
 _MAX_DELAY_US = 500_000  # margen máximo de reordenación: 0,5 s
 _SOCKET_BUFFER_BYTES = 1_048_576  # búfer de recepción: absorbe ráfagas por WiFi
 _MAX_READ_FAILURES = 3  # lecturas fallidas seguidas antes de reconectar
+_CAPTURE_BUFFER_FRAMES = 1  # ver nota de latencia en _open_capture
 
 
 def build_ffmpeg_options(transport: str) -> str:
@@ -70,37 +74,30 @@ def build_ffmpeg_loglevel() -> str:
     return "32" if get_app_log_level() <= logging.DEBUG else "0"
 
 
-def _to_qimage(frame) -> QImage:
-    """Convierte un frame BGR de OpenCV en un ``QImage`` independiente."""
-    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    height, width, channels = rgb.shape
-    return QImage(
-        rgb.data,
-        width,
-        height,
-        channels * width,
-        QImage.Format.Format_RGB888,
-    ).copy()
+class VideoStreamThread(threading.Thread):
+    """Hilo que captura frames de una URL RTSP con OpenCV.
 
-
-class VideoStreamThread(QThread):
-    """Hilo que captura frames de una URL RTSP con OpenCV."""
-
-    frame_ready = Signal(QImage)
-    stream_error = Signal(str)
-    stream_stopped = Signal()
+    Entrega cada frame BGR (tal cual lo da OpenCV, sin convertir) vía
+    ``on_frame`` en vez de una señal Qt: quien lo use decide qué hacer
+    con él (convertir a ``QImage``, codificar a JPEG...).
+    """
 
     def __init__(
         self,
         url: str,
         fps: int = 15,
         transport: str = "tcp",
-        parent: QWidget | None = None,
+        on_frame: Callable[[Any], None] | None = None,
+        on_error: Callable[[str], None] | None = None,
+        on_stopped: Callable[[], None] | None = None,
     ) -> None:
-        super().__init__(parent)
+        super().__init__(daemon=True)
         self._url = url
         self._fps = max(1, fps)
         self._transport = transport
+        self._on_frame = on_frame or (lambda frame: None)
+        self._on_error = on_error or (lambda message: None)
+        self._on_stopped = on_stopped or (lambda: None)
         self._running = False
 
     def stop(self) -> None:
@@ -117,7 +114,7 @@ class VideoStreamThread(QThread):
                     break
                 log.warning("No se pudo abrir el stream; reintentando…")
                 if first_failure:
-                    self.stream_error.emit(f"No se pudo abrir el stream: {self._url}")
+                    self._on_error(f"No se pudo abrir el stream: {self._url}")
                     first_failure = False
                 if not self._sleep_reconnect(retries):
                     break
@@ -133,7 +130,7 @@ class VideoStreamThread(QThread):
             if not self._sleep_reconnect(retries):
                 break
             retries += 1
-        self.stream_stopped.emit()
+        self._on_stopped()
         log.info("Stream RTSP cerrado")
 
     # -- Internos ---------------------------------------------------------
@@ -145,7 +142,7 @@ class VideoStreamThread(QThread):
         siguiente frame, así que dormir entre lecturas hace que el búfer
         de recepción se llene y la imagen acabe llegando con retardo
         creciente, a tirones y con cortes. El límite de fps se aplica
-        solo al emitir hacia la GUI, descartando los frames sobrantes.
+        solo al entregar el frame, descartando los sobrantes.
         """
         min_interval = 1.0 / self._fps
         last_emit = 0.0
@@ -164,14 +161,21 @@ class VideoStreamThread(QThread):
             if now - last_emit < min_interval:
                 continue
             last_emit = now
-            self.frame_ready.emit(_to_qimage(frame))
+            self._on_frame(frame)
 
     def _open_capture(self) -> cv2.VideoCapture | None:
         os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = build_ffmpeg_options(
             self._transport
         )
         os.environ["OPENCV_FFMPEG_LOGLEVEL"] = build_ffmpeg_loglevel()
-        return cv2.VideoCapture(self._url, cv2.CAP_FFMPEG)
+        capture = cv2.VideoCapture(self._url, cv2.CAP_FFMPEG)
+        # Sin esto, OpenCV/FFmpeg van acumulando un búfer interno de
+        # frames si el consumo no va tan rápido como la llegada, y la
+        # imagen acaba llegando cada vez más retrasada (el vídeo "se ve
+        # lento" aunque la red vaya bien). Con buffer=1 siempre se lee el
+        # frame más reciente disponible en vez de arrastrar backlog.
+        capture.set(cv2.CAP_PROP_BUFFERSIZE, _CAPTURE_BUFFER_FRAMES)
+        return capture
 
     def _sleep_reconnect(self, retries: int) -> bool:
         """Espera con backoff exponencial en fragmentos cortos; False si se
@@ -183,97 +187,3 @@ class VideoStreamThread(QThread):
         while self._running and time.monotonic() < deadline:
             time.sleep(0.05)
         return self._running
-
-
-class VideoWidget(QWidget):
-    """Panel de vista previa con gestión de arranque/parada del stream."""
-
-    def __init__(
-        self,
-        fps: int = 15,
-        transport: str = "tcp",
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self._fps = fps
-        self._transport = transport
-        self._thread: VideoStreamThread | None = None
-        self._stopping: list[VideoStreamThread] = []
-        self._last_pixmap: QPixmap | None = None
-
-        self._label = QLabel()
-        self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._label.setStyleSheet("background-color: #15151f; color: #7f849c;")
-        self._label.setWordWrap(True)
-        self._show_placeholder("Sin señal\n(conéctese una cámara real para ver el stream RTSP)")
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self._label)
-
-    def start(self, url: str) -> None:
-        """Arranca la captura del stream RTSP indicado."""
-        self.stop()
-        self._show_placeholder("Conectando con el stream…")
-        self._thread = VideoStreamThread(url, self._fps, self._transport)
-        self._thread.frame_ready.connect(self._show_frame)
-        self._thread.stream_error.connect(self._on_stream_error)
-        self._thread.start()
-
-    def stop(self) -> None:
-        """Detiene la captura en curso sin bloquear la interfaz.
-
-        Si el hilo no termina enseguida (puede estar dentro de un
-        ``read()`` que agota su timeout), se le suelta pero se conserva la
-        referencia y se desconectan sus señales: así no sigue pintando
-        frames del stream anterior ni se destruye mientras corre.
-        """
-        thread = self._thread
-        self._thread = None
-        self._last_pixmap = None
-        if thread is None:
-            return
-        thread.frame_ready.disconnect(self._show_frame)
-        thread.stream_error.disconnect(self._on_stream_error)
-        thread.stop()
-        if thread.wait(500):
-            return
-        self._stopping.append(thread)
-        thread.finished.connect(lambda: self._forget_thread(thread))
-
-    def _forget_thread(self, thread: VideoStreamThread) -> None:
-        if thread in self._stopping:
-            self._stopping.remove(thread)
-
-    def show_placeholder(self, text: str) -> None:
-        """Muestra un mensaje de relleno (p. ej. en modo simulación)."""
-        self.stop()
-        self._show_placeholder(text)
-
-    # -- Slots internos ---------------------------------------------------
-
-    def _show_frame(self, image: QImage) -> None:
-        self._last_pixmap = QPixmap.fromImage(image)
-        self._render_pixmap()
-
-    def _render_pixmap(self) -> None:
-        if self._last_pixmap is None:
-            return
-        scaled = self._last_pixmap.scaled(
-            self._label.size(),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        self._label.setPixmap(scaled)
-
-    def _on_stream_error(self, message: str) -> None:
-        log.error("Error de vídeo: %s", message)
-        self._show_placeholder(message)
-
-    def _show_placeholder(self, text: str) -> None:
-        self._label.setPixmap(QPixmap())
-        self._label.setText(text)
-
-    def resizeEvent(self, event) -> None:  # noqa: N802 - API de Qt
-        super().resizeEvent(event)
-        self._render_pixmap()

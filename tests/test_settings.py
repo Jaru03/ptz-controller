@@ -2,7 +2,7 @@
 
 import yaml
 
-from config.settings import Settings
+from config.settings import KeyboardConfig, Settings
 
 
 def test_defaults_are_used_without_file(tmp_path) -> None:
@@ -11,6 +11,23 @@ def test_defaults_are_used_without_file(tmp_path) -> None:
     assert settings.movement.speed == 0.5
     assert settings.joystick.deadzone == 0.08
     assert settings.keyboard.backend == "auto"
+
+
+def test_keyboard_backend_qt_is_normalized_to_window() -> None:
+    """'qt' era el nombre del backend antes de la migración a pywebview."""
+    assert KeyboardConfig(backend="qt").backend == "window"
+
+
+def test_loading_a_config_with_legacy_qt_backend_does_not_fail_validation(
+    tmp_path,
+) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text("keyboard:\n    backend: qt\n", encoding="utf-8")
+
+    settings = Settings.load(path)
+
+    assert settings.keyboard.backend == "window"
+    assert settings.validate() == []
 
 
 def test_roundtrip_save_and_load(tmp_path) -> None:

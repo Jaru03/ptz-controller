@@ -63,10 +63,13 @@ class KeyboardConfig:
     """Mapeo de teclas (nombres en minúsculas: 'w', 'space', 'esc', ...).
 
     ``backend`` acepta:
-      - 'auto': intenta pynput (teclado global) y cae a 'qt' si no arranca.
+      - 'auto': intenta pynput (teclado global) y cae a 'window' si no
+        arranca.
       - 'pynput': teclado global (requiere X11 o permisos del grupo input).
-      - 'qt': eventos de teclado de la propia ventana PySide6 (fiable en
-        Wayland y Windows).
+      - 'window': eventos de teclado de la propia ventana (fiable en
+        Wayland y Windows sin permisos especiales). Antes se llamaba
+        'qt'; un ``config.yaml`` con ese valor se sigue aceptando y se
+        normaliza a 'window' en cuanto se carga.
 
     Presets: ``preset_keys`` asigna teclas **por posición** a los presets
     que devuelve la cámara (la 1ª tecla va al 1er preset, etc.), de modo
@@ -95,7 +98,13 @@ class KeyboardConfig:
 
         Los tokens ONVIF son cadenas; una configuración antigua podía
         guardarlos como enteros ({'1': 1}), así que se convierten aquí.
+        También se renombra aquí el backend 'qt' (nombre anterior de
+        'window', desde la migración a pywebview) para que un
+        ``config.yaml`` ya existente no falle la validación tras
+        actualizar.
         """
+        if self.backend == "qt":
+            self.backend = "window"
         self.preset_keys = [str(key).lower() for key in self.preset_keys]
         self.preset_hotkeys = {
             str(key).lower(): str(token)
@@ -230,7 +239,7 @@ class Settings:
             )
         if not (0.0 < movement.zoom_step <= 1.0):
             warnings.append("movement.zoom_step debe estar entre 0 y 1")
-        if self.keyboard.backend not in ("auto", "pynput", "qt"):
+        if self.keyboard.backend not in ("auto", "pynput", "window"):
             warnings.append(
                 f"keyboard.backend '{self.keyboard.backend}' no es válido"
             )

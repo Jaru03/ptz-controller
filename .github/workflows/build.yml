@@ -29,6 +29,48 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Build frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+        working-directory: frontend
+        shell: bash
+
+      # GTK/WebKit para el backend de pywebview en Linux (Windows usa Edge
+      # WebView2, ya presente en el runner). Va ANTES de "uv sync": pygobject
+      # compila una extensión C contra libgirepository/cairo al instalarse,
+      # no solo en tiempo de ejecución, así que hacen falta también los
+      # paquetes "-dev". Nombres verificados contra Ubuntu 24.04 (noble); si
+      # ubuntu-latest cambia de imagen y esto empieza a fallar, es el primer
+      # sitio donde mirar.
+      #
+      # libegl1/libgl1/libxkbcommon0/libdbus-1-3/libfontconfig1 no son por
+      # PySide6 (ya no está): opencv-python trae su propio plugin Qt
+      # (cv2/qt/plugins/platforms/libqxcb.so) que PyInstaller sigue
+      # analizando aunque la app nunca lo use, y sin estas libs el paso de
+      # construcción deja avisos de ldd.
+      - name: GTK/WebKit + libs de cv2 (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1 \
+            libgirepository1.0-dev libcairo2-dev pkg-config python3-dev \
+            libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1
+        shell: bash
+
       - name: Install uv (Python 3.13)
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -36,22 +78,20 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --group dev --group build
+        run: uv sync --group dev --group build --group gtk
 
-      - name: Qt system deps (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1
-        shell: bash
-
+      # --skip-icons: icon.png/icon.ico ya están versionados en el repo
+      # (packaging/icon.{png,ico}) y regenerarlos no forma parte del
+      # pipeline automático — solo hace falta si alguien edita
+      # packaging/icon.svg a mano (ver packaging/make_icons.py).
       - name: Build executable
-        run: uv run --group build python packaging/build.py --clean
+        run: uv run --group build python packaging/build.py --clean --skip-icons
         shell: bash
 
       # Comprobación de humo: el binario debe arrancar, crear su
       # configuración en el directorio del usuario y cerrarse solo. Si
-      # faltara un WSDL o un módulo oculto, fallaría aquí.
+      # faltara un WSDL, un módulo oculto o el frontend/dist empaquetado
+      # mal, fallaría aquí.
       - name: Smoke test (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -61,6 +101,7 @@ jobs:
           sleep 20
           kill "$pid" 2>/dev/null || true
           test -f "$HOME/.config/ptz-controller/config.yaml"
+          grep -q "Aplicación iniciada" "$HOME/.config/ptz-controller/logs/ptz-controller.log"
           echo "El ejecutable arrancó y creó su configuración."
         shell: bash
 
@@ -86,6 +127,10 @@ jobs:
           Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
           $config = Join-Path $env:APPDATA 'ptz-controller\config.yaml'
           if (-not (Test-Path $config)) { throw "No se creó $config" }
+          $logPath = Join-Path $env:APPDATA 'ptz-controller\logs\ptz-controller.log'
+          if (-not (Select-String -Path $logPath -Pattern 'Aplicación iniciada' -Quiet)) {
+            throw "No se encontró 'Aplicación iniciada' en $logPath"
+          }
           Write-Host 'El ejecutable arrancó y creó su configuración.'
         shell: pwsh
 

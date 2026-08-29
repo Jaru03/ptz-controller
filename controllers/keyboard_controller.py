@@ -5,11 +5,12 @@ comandos cuando la dirección cambia (delegado en ``MovementState``).
 
 Dos implementaciones con la misma lógica:
   * ``PynputKeyboardController``: teclado global (pynput).
-  * ``QtKeyboardController``: eventos de la ventana PySide6 (fiable en
-    Wayland y Windows sin permisos especiales).
+  * ``WindowKeyboardController``: eventos de la propia ventana (fiable
+    en Wayland y Windows sin permisos especiales).
 
 La factoría ``create_keyboard_controller`` elige el backend según la
-configuración y, en modo 'auto', cae a Qt si pynput no puede arrancar.
+configuración y, en modo 'auto', cae al teclado de ventana si pynput no
+puede arrancar.
 
 Nombres canónicos de tecla: minúsculas ('w', 'space', 'esc', '1'), teclas
 de función ('f1'...'f12') y pad numérico ('kp_0'...'kp_9', 'kp_enter',
@@ -285,8 +286,15 @@ class PynputKeyboardController(KeyboardController):
         super().stop()
 
 
-class QtKeyboardController(KeyboardController):
-    """Teclado capturado por la ventana PySide6 (fiable y sin permisos)."""
+class WindowKeyboardController(KeyboardController):
+    """Teclado capturado por la propia ventana (fiable y sin permisos).
+
+    En PySide6 son los eventos de teclado de ``QMainWindow``; en el
+    frontend web (pywebview) son ``keydown``/``keyup`` de JS reenviados a
+    ``on_key_down``/``on_key_up`` vía ``Api.key_down``/``Api.key_up``
+    (``gui_web/api.py``). Se llamó ``QtKeyboardController``/backend 'qt'
+    antes de la migración a pywebview.
+    """
 
     requires_window_events = True
 
@@ -297,11 +305,11 @@ class QtKeyboardController(KeyboardController):
         bus: EventBus,
         presets: PresetRegistry | None = None,
     ) -> None:
-        super().__init__(config, movement, bus, backend="qt", presets=presets)
+        super().__init__(config, movement, bus, backend="window", presets=presets)
 
     def start(self) -> None:
         super().start()
-        log.info("Teclado por ventana activo (qt)")
+        log.info("Teclado por ventana activo (window)")
 
 
 _PYNPUT_KEYPAD_VK = {
@@ -343,95 +351,10 @@ def pynput_key_name(key: Any) -> str:
     return str(key).lower()
 
 
-def _qt_keypad_name(key: int) -> str:
-    """Nombre canónico de una tecla del pad numérico (Qt)."""
-    from PySide6.QtCore import Qt
-
-    if Qt.Key_0 <= key <= Qt.Key_9:
-        return f"kp_{key - int(Qt.Key_0)}"
-    # Con Bloq Num desactivado el pad emite las teclas de navegación.
-    navigation = {
-        Qt.Key_Insert: "kp_0",
-        Qt.Key_End: "kp_1",
-        Qt.Key_Down: "kp_2",
-        Qt.Key_PageDown: "kp_3",
-        Qt.Key_Left: "kp_4",
-        Qt.Key_Clear: "kp_5",
-        Qt.Key_Right: "kp_6",
-        Qt.Key_Home: "kp_7",
-        Qt.Key_Up: "kp_8",
-        Qt.Key_PageUp: "kp_9",
-        Qt.Key_Delete: "kp_decimal",
-        Qt.Key_Enter: "kp_enter",
-        Qt.Key_Return: "kp_enter",
-        Qt.Key_Plus: "kp_plus",
-        Qt.Key_Minus: "kp_minus",
-        Qt.Key_Asterisk: "kp_multiply",
-        Qt.Key_Slash: "kp_divide",
-        Qt.Key_Period: "kp_decimal",
-        Qt.Key_Comma: "kp_decimal",
-    }
-    return navigation.get(key, "")
-
-
-def _qt_is_keypad(event: Any) -> bool:
-    """Indica si el evento viene del pad numérico."""
-    from PySide6.QtCore import Qt
-
-    modifiers = getattr(event, "modifiers", None)
-    if modifiers is None:
-        return False
-    try:
-        return bool(modifiers() & Qt.KeyboardModifier.KeypadModifier)
-    except TypeError:  # pragma: no cover - eventos simulados en tests
-        return False
-
-
-def qt_key_name(event: Any) -> str:
-    """Convierte un QKeyEvent a nombre canónico ('w', 'esc', 'kp_1', 'f1').
-
-    El pad numérico se identifica por ``KeypadModifier`` y **antes** de
-    mirar el texto: con Bloq Num activado escribe los mismos caracteres
-    que la fila de dígitos y, sin él, no escribe nada.
-    """
-    from PySide6.QtCore import Qt
-
-    key = event.key()
-    if _qt_is_keypad(event):
-        return _qt_keypad_name(key)
-
-    text = event.text()
-    if text:
-        if text == " ":
-            return "space"
-        if text.isprintable() and text.strip():
-            return text.lower()
-
-    if Qt.Key_F1 <= key <= Qt.Key_F12:
-        return f"f{key - int(Qt.Key_F1) + 1}"
-    mapping = {
-        Qt.Key_Escape: "esc",
-        Qt.Key_Space: "space",
-        Qt.Key_Up: "up",
-        Qt.Key_Down: "down",
-        Qt.Key_Left: "left",
-        Qt.Key_Right: "right",
-        Qt.Key_Home: "home",
-        Qt.Key_End: "end",
-        Qt.Key_PageUp: "pageup",
-        Qt.Key_PageDown: "pagedown",
-        Qt.Key_Insert: "insert",
-        Qt.Key_Delete: "delete",
-        Qt.Key_Tab: "tab",
-        Qt.Key_Backspace: "backspace",
-        Qt.Key_Return: "enter",
-        Qt.Key_Enter: "enter",
-    }
-    return mapping.get(key, "")
 
 
 def _is_wayland_session() -> bool:
-    """Detecta sesión Wayland (donde pynput no captura eventos de Qt)."""
+    """Detecta sesión Wayland (donde pynput no captura eventos de la ventana)."""
     return os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
 
 
@@ -444,27 +367,28 @@ def create_keyboard_controller(
     """Crea y arranca el controlador de teclado según la configuración.
 
     En modo 'auto' intenta pynput (teclado global) y, si no puede
-    arrancar, devuelve la implementación Qt (eventos de la ventana). En
-    sesiones Wayland se usa directamente Qt: pynput depende de X11 y bajo
-    Wayland su listener arranca pero no recibe las teclas de las ventanas
-    Qt nativas.
+    arrancar, devuelve el teclado de ventana (``WindowKeyboardController``).
+    En sesiones Wayland se usa directamente el de ventana: pynput depende
+    de X11 y bajo Wayland su listener arranca pero no recibe las teclas
+    de la ventana nativa (sea Qt o WebKitGTK/pywebview) — no es una
+    limitación específica de ningún toolkit de GUI en concreto.
     """
     backend = config.backend
     if backend == "pynput":
         controller = PynputKeyboardController(config, movement, bus, presets=presets)
         controller.start()
         return controller
-    if backend == "qt":
-        return QtKeyboardController(config, movement, bus, presets=presets)
+    if backend == "window":
+        return WindowKeyboardController(config, movement, bus, presets=presets)
 
-    # auto: probar pynput y caer a Qt
+    # auto: probar pynput y caer al teclado de ventana
     if _is_wayland_session():
-        log.warning("Sesión Wayland detectada: usando teclado de ventana Qt")
-        return QtKeyboardController(config, movement, bus, presets=presets)
+        log.warning("Sesión Wayland detectada: usando teclado de ventana")
+        return WindowKeyboardController(config, movement, bus, presets=presets)
     try:
         controller = PynputKeyboardController(config, movement, bus, presets=presets)
         controller.start()
         return controller
     except BackendUnavailable as exc:
-        log.warning("pynput no disponible, usando teclado de ventana Qt: %s", exc)
-        return QtKeyboardController(config, movement, bus, presets=presets)
+        log.warning("pynput no disponible, usando teclado de ventana: %s", exc)
+        return WindowKeyboardController(config, movement, bus, presets=presets)

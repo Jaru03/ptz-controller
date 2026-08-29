@@ -1,7 +1,7 @@
 [project]
 name = "ptz-controller"
 version = "0.3.2"
-description = "Controlador universal de cámaras PTZ ONVIF (teclado, gamepad, interfaz PySide6)"
+description = "Controlador universal de cámaras PTZ ONVIF (teclado, gamepad, interfaz web con React)"
 readme = "README.md"
 authors = [
     { name = "Jose Rico", email = "josearudeveloper@gmail.com" }
@@ -11,9 +11,9 @@ dependencies = [
     "onvif-zeep>=0.2.12",
     "pygame>=2.6",
     "pynput>=1.8",
-    "PySide6>=6.8",
     "PyYAML>=6.0",
     "opencv-python>=4.10",
+    "pywebview>=6.2.1",
 ]
 
 [project.scripts]
@@ -25,6 +25,18 @@ dev = [
 ]
 build = [
     "pyinstaller>=6.11",
+]
+# Backend GTK de pywebview, solo en Linux (Windows usa Edge WebView2 vía su
+# propio backend). Aparte de "dependencies" a propósito: requiere cabeceras
+# de desarrollo del sistema (gobject-introspection-devel/
+# libgirepository*-dev, cairo-gobject-devel/libcairo2-dev, python3-devel)
+# que la CI de tests no tiene por qué instalar solo para que "uv sync"
+# resuelva — pytest no importa pywebview/gi en ningún punto. Necesario
+# para ejecutar la app en desarrollo y para empaquetar
+# (packaging/build.py).
+gtk = [
+    "pygobject>=3.58.0; sys_platform == 'linux'",
+    "pycairo>=1.29.1; sys_platform == 'linux'",
 ]
 
 [build-system]

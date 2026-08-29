@@ -7,8 +7,9 @@ sin perder el hilo.
 ## Proyecto
 
 `ptz-controller` es un controlador de cámaras PTZ compatibles con ONVIF:
-teclado (WASD) y mando SDL, movimiento proporcional, presets, y una GUI
-PySide6 con vista previa RTSP. Incluye un modo simulado (Mock) para
+teclado (WASD) y mando SDL, movimiento proporcional, presets, y una
+interfaz web (React + shadcn/ui) dentro de una ventana nativa con
+pywebview, con vista previa RTSP. Incluye un modo simulado (Mock) para
 desarrollar sin hardware.
 
 - Lenguaje del proyecto y de los mensajes de usuario: **español**.
@@ -19,17 +20,26 @@ desarrollar sin hardware.
 ## Comandos
 
 ```bash
-uv sync --group dev                 # instalar dependencias (incl. pytest)
+uv sync --group dev --group gtk     # --group gtk solo hace falta en Linux
+cd frontend && pnpm install && pnpm run build && cd ..
 uv run python main.py               # modo simulado (Mock)
 uv run python main.py --real        # cámara real ONVIF (config.yaml)
 uv run python main.py --log-level DEBUG
-uv run pytest                       # 122 tests (offscreen Qt)
+uv run pytest                       # ver tests/ para el nº actual
 
-uv sync --group build                              # PyInstaller
-uv run --group build python packaging/build.py --clean   # dist/ptz-controller
+uv sync --group build --group gtk                  # PyInstaller + GTK
+uv run --group build python packaging/build.py --clean --skip-icons
 ./packaging/install.sh                             # instala en ~/.local
 uv run --group build python packaging/build_rpm.py # RPM Fedora (dist/rpm/RPMS)
 ```
+
+`--group gtk` instala `pygobject`/`pycairo` (backend GTK de pywebview en
+Linux); requiere cabeceras de desarrollo del sistema
+(`gobject-introspection-devel`/`libgirepository1.0-dev`,
+`cairo-gobject-devel`/`libcairo2-dev`, `python3-devel`) y, en tiempo de
+ejecución, WebKitGTK (`webkit2gtk4.1`/`gir1.2-webkit2-4.1`,
+`python3-gobject`/`python3-gi`). El frontend (`frontend/dist/`) hay que
+reconstruirlo tras cualquier cambio en `frontend/src/`.
 
 ## Arquitectura (resumen)
 
@@ -41,14 +51,16 @@ camera/ptz_controller.py# PTZController (ABC) + OnvifPTZController
 camera/client.py        # OnvifClient (onvif-zeep): Media/PTZ/Device
 camera/mock_ptz.py      # PTZ virtual con integración determinista
 camera/discovery.py     # WS-Discovery por UDP
-controllers/            # entrada: MovementState, PresetRegistry, teclado (pynput/Qt), joystick
+controllers/            # entrada: MovementState, PresetRegistry, teclado (pynput/ventana), joystick
 core/event_bus.py       # EventBus thread-safe + Ref
 core/command_worker.py  # hilo que ejecuta el trabajo ONVIF fuera de la GUI
-gui/                    # PySide6: main_window, camera_widget, video_widget, settings_dialog
+core/video_stream.py    # captura RTSP en hilo propio (Qt-free, reubicado de gui/video_widget.py)
+gui_web/                # puente Python↔JS: Api (js_api), EventBridge, servidor MJPEG
+frontend/               # interfaz React + TypeScript + Tailwind + shadcn/ui + Motion
 utils/logger.py         # logging consola + archivo rotativo
 utils/paths.py          # rutas: recursos del bundle vs directorio del usuario
 packaging/              # PyInstaller (.spec, build.py), iconos e instaladores
-tests/                  # pytest (122 tests)
+tests/                  # pytest
 ```
 
 Temas del bus: `command.move`, `command.stop`, `command.gotoPreset`,
@@ -63,8 +75,19 @@ que `main.py` enruta todos los comandos de cámara al `CommandWorker`.
 
 ## Estado del repositorio
 
-`master` en `bc25718` (merge del PR #1), sin cambios pendientes. Todo el
-trabajo descrito más abajo está commiteado y publicado.
+**Migración completa de la GUI PySide6 a pywebview + React/shadcn/ui**
+(rama `pywebview-react-migration`, 7 fases, cada una commiteada por
+separado). `gui/` (PySide6) se borró por completo; la interfaz ahora es
+`frontend/` (React) servida dentro de una ventana pywebview, con
+`gui_web/` como pegamento Python↔JS. El backend (ONVIF, `EventBus`,
+controladores de teclado/joystick) no cambió de lógica. Todo lo que hay
+debajo de "Contexto técnico de la sesión" es **historial de antes de
+esa migración**: los fragmentos de código y rutas que mencionan `gui/`
+(p. ej. `gui/video_widget.py`) ya no existen tal cual — la lógica
+equivalente vive en `core/video_stream.py` y `gui_web/`. Se conserva
+como registro de decisiones de diseño (por qué el `CommandWorker` fusiona
+por clave, por qué el zoom tiene tres modos, etc.), que siguen siendo
+válidas.
 **No commitear sin que el usuario lo pida.**
 
 ### Release v0.1.0 (2026-08-03)
@@ -400,8 +423,10 @@ DEBUG` se ven los `ContinuousMove` / `RelativeMove` que salen.
 - `# noqa` solo donde hace falta; mantener los `# noqa: BLE001` existentes
   para errores variados de red/SOAP.
 - No añadir comentarios innecesarios al código.
-- Ejecutar siempre `uv run pytest` tras cambios (122 tests) y, si hay GUI,
-  verificar con la plataforma `offscreen` (ya configurada en los tests).
+- Ejecutar siempre `uv run pytest` tras cambios en Python; si se toca el
+  frontend, `cd frontend && pnpm run build` (comprobación de tipos) y
+  revisión manual en navegador (no hay tests automatizados del frontend
+  todavía).
 - Ninguna petición ONVIF en el hilo de la GUI: pasar por el
   `CommandWorker` (ver "Llamadas ONVIF bloqueando la GUI").
 - Los presets se identifican por token ONVIF (cadena opaca), nunca por

@@ -12,11 +12,8 @@ from __future__ import annotations
 
 import argparse
 import shutil
-import sys
 from pathlib import Path
-from typing import Callable
-
-from PySide6.QtWidgets import QApplication, QDialog
+from typing import Any, Callable
 
 from camera.ptz_controller import OnvifPTZController, PTZController
 from camera.mock_ptz import MockPTZController
@@ -28,11 +25,20 @@ from controllers.pygame_events import PyGameEventBroker
 from core.command_worker import CommandWorker
 from core.event_bus import EventBus
 from core.ref import Ref
-from gui.connection_dialog import ConnectionDialog
-from gui.main_window import MainWindow
-from models.commands import ConnectCommand, PTZStatus
+from gui_web.api import Api
+from gui_web.bridge import EventBridge
+from gui_web.poller import StatusPoller
+from gui_web.video_controller import VideoController
+from gui_web.video_server import VideoHttpServer
+from models.commands import QuitCommand
 from utils.logger import get_logger, setup_logging
-from utils.paths import bundled_file, default_config_path, default_log_dir
+from utils.paths import (
+    bundled_file,
+    default_config_path,
+    default_log_dir,
+    frontend_index_html,
+    is_frozen,
+)
 
 log = get_logger(__name__)
 
@@ -95,7 +101,7 @@ def resolve_mock(args: argparse.Namespace, settings: Settings) -> bool:
 
     Precedencia: ``--mock`` y ``--real`` explicitos y, si no se indica
     nada, la configuración en desarrollo. El ejecutable empaquetado
-    (PyInstaller, ``sys.frozen``) arranca en modo real por defecto:
+    (PyInstaller, ``is_frozen()``) arranca en modo real por defecto:
     así el binario publicado controla la cámara ONVIF sin más
     argumentos y ``--mock`` queda reservado para pruebas de humo.
     """
@@ -103,7 +109,7 @@ def resolve_mock(args: argparse.Namespace, settings: Settings) -> bool:
         return True
     if args.real:
         return False
-    return False if sys.frozen else settings.camera.mock
+    return False if is_frozen() else settings.camera.mock
 
 
 def create_ptz_controller(settings: Settings, mock: bool) -> PTZController:
@@ -128,6 +134,115 @@ def create_ptz_controller(settings: Settings, mock: bool) -> PTZController:
     )
     log.info("Modo cámara real (ONVIF) configurado para %s:%s", camera.ip, camera.port)
     return controller
+
+
+def _run_gui(
+    *,
+    bus: EventBus,
+    settings: Settings,
+    config_path: Path,
+    keyboard: Any,
+    joystick: JoystickController | None,
+    broker: PyGameEventBroker,
+    worker: CommandWorker,
+    ref: Ref,
+    poll_status: Callable[[], None],
+) -> int:
+    """Arranca el frontend (React) dentro de una ventana pywebview."""
+    import webview
+
+    # DevTools disponible en desarrollo (clic derecho -> Inspeccionar) pero
+    # sin abrirse solo al arrancar: por defecto pywebview lo abre
+    # automáticamente en cuanto debug=True (ver más abajo).
+    webview.settings["OPEN_DEVTOOLS_IN_DEBUG"] = False
+
+    index_html = frontend_index_html()
+    if not index_html.is_file():
+        log.error(
+            "No se encuentra %s: compile el frontend antes de arrancar "
+            "('cd frontend && pnpm install && pnpm run build')",
+            index_html,
+        )
+        return 1
+
+    api = Api(bus, settings, config_path, keyboard=keyboard)
+    window_ref: dict[str, Any] = {"window": None}
+    EventBridge(bus, lambda: window_ref["window"])
+    # settings.camera.mock puede cambiar en caliente (ConnectionScreen),
+    # así que el intervalo se recalcula en cada ciclo (ver StatusPoller).
+    poller = StatusPoller(
+        poll_status,
+        interval_ms=lambda: (
+            settings.gui.poll_interval_ms if settings.camera.mock else 500
+        ),
+    )
+
+    video_server = VideoHttpServer()
+    video_server.start()
+    video_controller = VideoController(
+        bus,
+        video_server,
+        fps=settings.gui.video_fps,
+        transport=settings.gui.rtsp_transport,
+    )
+
+    quit_guard = {"done": False}
+
+    def on_quit() -> None:
+        if quit_guard["done"]:
+            return
+        quit_guard["done"] = True
+        log.info("Cerrando aplicación…")
+        poller.stop()
+        video_controller.stop()
+        video_server.stop()
+        keyboard.stop()
+        if joystick is not None:
+            joystick.stop()
+        broker.stop()
+        worker.stop()
+        try:
+            ref.value.stop()
+            ref.value.disconnect()
+        except Exception:  # noqa: BLE001 - cierre tolerante a errores
+            pass
+        try:
+            settings.save(config_path)
+        except OSError as exc:
+            log.error("No se pudo guardar la configuración: %s", exc)
+
+    bus.subscribe("command.quit", lambda _cmd: on_quit())
+
+    window = webview.create_window(
+        "Controlador de cámaras PTZ ONVIF",
+        url=f"{index_html.as_uri()}?videoPort={video_server.port}",
+        js_api=api,
+        width=1100,
+        height=720,
+    )
+    window_ref["window"] = window
+    window.events.closed += lambda: bus.send(QuitCommand())
+
+    def on_started() -> None:
+        # Estado inicial, igual que MainWindow.__init__: así el frontend
+        # no arranca vacío a la espera del primer tick del poller.
+        #
+        # Tiene que ir en el callback de arranque de webview.start(), NO
+        # justo tras create_window: publicar antes de que el bucle de
+        # eventos de GTK esté corriendo hace que EventBridge llame a
+        # evaluate_js() sobre una ventana que aún no puede atenderlo, y
+        # evaluate_js() se queda bloqueado para siempre (confirmado con
+        # un script de prueba aislado: colgaba justo ahí, de forma no
+        # determinista según el timing).
+        bus.publish("ptz.status", ref.value.get_status())
+        bus.publish("ptz.presets", ref.value.list_presets())
+        poller.start()
+
+    log.info("Aplicación iniciada")
+    webview.start(on_started, debug=not is_frozen())
+    on_quit()
+    log.info("Aplicación finalizada")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -262,65 +377,17 @@ def main(argv: list[str] | None = None) -> int:
 
     # -- GUI --------------------------------------------------------------
 
-    app = QApplication(sys.argv[:1])
-    app.setApplicationName("ptz-controller")
-
-    connection_dialog = ConnectionDialog(settings)
-    if connection_dialog.exec() != QDialog.DialogCode.Accepted:
-        log.info("Conexión cancelada por el usuario; cerrando aplicación")
-        keyboard.stop()
-        if joystick is not None:
-            joystick.stop()
-        broker.stop()
-        worker.stop()
-        return 0
-    connection_dialog.apply_to_settings()
-    mock = resolve_mock(args, settings)
-
-    poll_interval = settings.gui.poll_interval_ms if mock else 500
-    window = MainWindow(
-        controller_ref=ref,
+    return _run_gui(
         bus=bus,
         settings=settings,
-        keyboard_controller=keyboard,
-        config_path=str(config_path),
-        poll_interval_ms=poll_interval,
+        config_path=config_path,
+        keyboard=keyboard,
+        joystick=joystick,
+        broker=broker,
+        worker=worker,
+        ref=ref,
         poll_status=lambda: worker.submit(publish_status, key="status"),
     )
-    window.show()
-    log.info("Aplicación iniciada (modo: %s)", "mock" if mock else "real")
-    bus.send(ConnectCommand())
-
-    # -- Cierre ordenado --------------------------------------------------
-
-    quit_guard = {"done": False}
-
-    def on_quit() -> None:
-        if quit_guard["done"]:
-            return
-        quit_guard["done"] = True
-        log.info("Cerrando aplicación…")
-        keyboard.stop()
-        if joystick is not None:
-            joystick.stop()
-        broker.stop()
-        worker.stop()
-        try:
-            ref.value.stop()
-            ref.value.disconnect()
-        except Exception:  # noqa: BLE001 - cierre tolerante a errores
-            pass
-        try:
-            settings.save(config_path)
-        except OSError as exc:
-            log.error("No se pudo guardar la configuración: %s", exc)
-        app.quit()
-
-    bus.subscribe("command.quit", lambda _cmd: on_quit())
-
-    exit_code = app.exec()
-    log.info("Aplicación finalizada")
-    return exit_code
 
 
 if __name__ == "__main__":

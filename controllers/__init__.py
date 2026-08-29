@@ -10,10 +10,9 @@ from controllers.keyboard_controller import (
     BackendUnavailable,
     KeyboardController,
     PynputKeyboardController,
-    QtKeyboardController,
+    WindowKeyboardController,
     create_keyboard_controller,
     pynput_key_name,
-    qt_key_name,
 )
 from controllers.pygame_events import PyGameEventBroker
 
@@ -25,8 +24,7 @@ __all__ = [
     "MovementState",
     "PyGameEventBroker",
     "PynputKeyboardController",
-    "QtKeyboardController",
+    "WindowKeyboardController",
     "create_keyboard_controller",
     "pynput_key_name",
-    "qt_key_name",
 ]

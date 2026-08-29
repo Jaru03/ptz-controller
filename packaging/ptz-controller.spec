@@ -51,28 +51,27 @@ datas = [
 # zeep lee sus XSD/XML de plantilla en tiempo de ejecución.
 datas += collect_data_files("zeep")
 
+_frontend_dist = PROJECT_ROOT / "frontend" / "dist"
+if _frontend_dist.is_dir():
+    # Build estático de React/Vite que carga pywebview (utils/paths.py:
+    # frontend_index_html()). Hay que generarlo antes de empaquetar con
+    # ``cd frontend && npm ci && npm run build``.
+    datas.append((str(_frontend_dist), "frontend/dist"))
+
 hiddenimports = [
     "onvif",
     "zeep",
     "zeep.transports",
     # onvif-zeep resuelve los servicios por nombre en tiempo de ejecución.
     *collect_submodules("onvif"),
+    # Backend GTK de pywebview en Linux (en Windows usa Edge WebView2 vía
+    # su propio backend, sin necesitar esto).
+    *collect_submodules("webview"),
 ]
 
 excludes = [
-    # Módulos Qt que la aplicación no usa: recortan bastante el binario.
-    "PySide6.QtQml",
-    "PySide6.Qt3DCore",
-    "PySide6.QtWebEngineCore",
-    "PySide6.QtWebEngineWidgets",
-    "PySide6.QtMultimedia",
-    "PySide6.QtCharts",
-    "PySide6.QtDataVisualization",
-    "PySide6.QtPdf",
-    "PySide6.QtQuick",
-    "PySide6.QtQuick3D",
-    "PySide6.QtDesigner",
-    "PySide6.QtBluetooth",
+    # Módulos que ninguna dependencia usa en tiempo de ejecución, pero que
+    # PyInstaller a veces detecta igual: recortan el binario.
     "matplotlib",
     "tkinter",
     "pytest",
@@ -107,7 +106,7 @@ exe = EXE(
     upx=False,
     runtime_tmpdir=None,
     # Sin consola: es una aplicación gráfica. Los mensajes siguen yendo
-    # al archivo de logs y al panel de logs de la propia ventana.
+    # al archivo de logs (utils/logger.py).
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,

@@ -40,9 +40,11 @@ movement:
 
 keyboard:
     backend: auto
-    # auto: pynput global, con fallback a la ventana Qt
+    # auto: pynput global, con fallback al teclado de ventana
     # pynput: solo teclado global (X11 / grupo input en Linux)
-    # qt: solo eventos de la ventana (fiable en Wayland y Windows)
+    # window: solo eventos de la propia ventana (fiable en Wayland y
+    #         Windows). Se llamaba 'qt' antes de la migración a pywebview;
+    #         ese valor se sigue aceptando y se normaliza automáticamente.
     up: w
     down: s
     left: a
