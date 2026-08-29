@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { Gamepad2, Keyboard } from 'lucide-react'
+import { GamepadDiagram } from '@/components/controls/GamepadDiagram'
 import { keyLabel } from '@/lib/keymap'
 import { api } from '@/lib/api'
 import type { ControlsInfo } from '@/lib/types'
@@ -18,85 +20,134 @@ export function ControlsPanel() {
   if (!info) return null
 
   return (
-    <div className="h-full space-y-4 overflow-y-auto p-1">
-      <KeyboardGroup keyboard={info.keyboard} />
-      <JoystickGroup joystick={info.joystick} />
-      <p className="rounded-md border bg-muted/50 p-3 text-sm text-muted-foreground">
+    <div className="h-full space-y-8 overflow-y-auto p-2">
+      <KeyboardSection keyboard={info.keyboard} />
+      <div className="border-t" />
+      <JoystickSection joystick={info.joystick} />
+      <p className="rounded-md border bg-muted/50 p-4 text-sm text-muted-foreground">
         Los controles pueden personalizarse en config.yaml (secciones keyboard y
-        joystick). Las teclas de preset se asignan por posición a las escenas de la
+        joystick). Las teclas de escena se asignan por posición a los presets de la
         cámara; el pad numérico funciona igual que la fila de dígitos.
       </p>
     </div>
   )
 }
 
-function KeyboardGroup({ keyboard }: { keyboard: ControlsInfo['keyboard'] }) {
-  const movement = [keyboard.up, keyboard.down, keyboard.left, keyboard.right]
-    .map(keyLabel)
-    .join(' / ')
-  const presetRows = keyboard.preset_keys
-    .map((key, index) => `${keyLabel(key)} → preset ${index + 1}`)
-    .join(' · ')
+function KeyboardSection({ keyboard }: { keyboard: ControlsInfo['keyboard'] }) {
   const hotkeyEntries = Object.entries(keyboard.preset_hotkeys)
 
   return (
-    <section className="space-y-2">
-      <h3 className="text-sm font-medium">Teclado</h3>
-      <Rows
-        rows={[
-          ['Movimiento', movement],
-          ['Zoom', `${keyLabel(keyboard.zoom_in)} (zoom +) / ${keyLabel(keyboard.zoom_out)} (zoom −)`],
-          ['Escenas (presets)', presetRows || '—'],
-          ...(hotkeyEntries.length
-            ? ([
-                [
-                  'Atajos fijos',
-                  hotkeyEntries.map(([key, token]) => `${keyLabel(key)} → token ${token}`).join(' · '),
-                ],
-              ] as const)
-            : []),
-          ['Detener', keyLabel(keyboard.stop)],
-          ['Salir', keyLabel(keyboard.quit)],
-        ]}
-      />
-    </section>
-  )
-}
+    <section className="space-y-5">
+      <SectionTitle icon={Keyboard} text="Teclado" />
 
-function JoystickGroup({ joystick }: { joystick: ControlsInfo['joystick'] }) {
-  const tilt = joystick.invert_tilt ? 'invertido' : 'normal'
-  const presets = joystick.preset_buttons
-    .map((button, index) => `${index + 1} → botón ${button}`)
-    .join(', ')
+      <div className="flex flex-wrap items-start gap-10">
+        <Field label="Movimiento">
+          <div className="flex flex-col items-center gap-1.5">
+            <KeyCap>{keyLabel(keyboard.up)}</KeyCap>
+            <div className="flex gap-1.5">
+              <KeyCap>{keyLabel(keyboard.left)}</KeyCap>
+              <KeyCap>{keyLabel(keyboard.down)}</KeyCap>
+              <KeyCap>{keyLabel(keyboard.right)}</KeyCap>
+            </div>
+          </div>
+        </Field>
 
-  return (
-    <section className="space-y-2">
-      <h3 className="text-sm font-medium">Mando (joystick)</h3>
-      <Rows
-        rows={[
-          [
-            'Movimiento',
-            `Stick izquierdo (pan: eje ${joystick.pan_axis}, tilt: eje ${joystick.tilt_axis}, ${tilt})`,
-          ],
-          ['Zoom', `Eje ${joystick.zoom_in_axis} (zoom +) / eje ${joystick.zoom_out_axis} (zoom −)`],
-          ['Velocidad', `Botón ${joystick.speed_up_button} (+1) / Botón ${joystick.speed_down_button} (−1)`],
-          ['Home', `Botón ${joystick.home_button}`],
-          ['Presets', presets || '—'],
-        ]}
-      />
-    </section>
-  )
-}
+        <Field label="Zoom">
+          <div className="flex items-center gap-2">
+            <LabeledKey keyName={keyboard.zoom_in} caption="zoom +" />
+            <LabeledKey keyName={keyboard.zoom_out} caption="zoom −" />
+          </div>
+        </Field>
 
-function Rows({ rows }: { rows: readonly (readonly [string, string])[] }) {
-  return (
-    <dl className="space-y-1.5 rounded-md border p-3 text-sm">
-      {rows.map(([label, value]) => (
-        <div key={label} className="flex flex-col gap-0.5 sm:flex-row sm:justify-between sm:gap-4">
-          <dt className="shrink-0 text-muted-foreground">{label}</dt>
-          <dd className="text-right">{value}</dd>
+        <Field label="Detener / Salir">
+          <div className="flex items-center gap-2">
+            <LabeledKey keyName={keyboard.stop} caption="detener" />
+            <LabeledKey keyName={keyboard.quit} caption="salir" />
+          </div>
+        </Field>
+      </div>
+
+      <Field label="Escenas (presets)">
+        <div className="flex flex-wrap gap-2">
+          {keyboard.preset_keys.map((key, index) => (
+            <Chip key={key}>
+              <KeyCap small>{keyLabel(key)}</KeyCap>
+              <span className="text-muted-foreground">preset {index + 1}</span>
+            </Chip>
+          ))}
         </div>
-      ))}
-    </dl>
+      </Field>
+
+      {hotkeyEntries.length > 0 && (
+        <Field label="Atajos fijos">
+          <div className="flex flex-wrap gap-2">
+            {hotkeyEntries.map(([key, token]) => (
+              <Chip key={key}>
+                <KeyCap small>{keyLabel(key)}</KeyCap>
+                <span className="text-muted-foreground">token {token}</span>
+              </Chip>
+            ))}
+          </div>
+        </Field>
+      )}
+    </section>
+  )
+}
+
+function JoystickSection({ joystick }: { joystick: ControlsInfo['joystick'] }) {
+  return (
+    <section className="space-y-5">
+      <SectionTitle icon={Gamepad2} text="Mando (joystick)" />
+      <div className="mx-auto max-w-xl">
+        <GamepadDiagram joystick={joystick} />
+      </div>
+    </section>
+  )
+}
+
+function SectionTitle({ icon: Icon, text }: { icon: typeof Keyboard; text: string }) {
+  return (
+    <h3 className="flex items-center gap-2 text-sm font-medium">
+      <Icon className="size-4 text-muted-foreground" />
+      {text}
+    </h3>
+  )
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{label}</p>
+      {children}
+    </div>
+  )
+}
+
+function LabeledKey({ keyName, caption }: { keyName: string; caption: string }) {
+  return (
+    <div className="flex flex-col items-center gap-1.5">
+      <KeyCap>{keyLabel(keyName)}</KeyCap>
+      <span className="text-xs text-muted-foreground">{caption}</span>
+    </div>
+  )
+}
+
+function KeyCap({ children, small }: { children: React.ReactNode; small?: boolean }) {
+  return (
+    <span
+      className={`inline-flex items-center justify-center rounded-md border bg-background font-mono font-medium shadow-[0_2px_0_0] shadow-border ${
+        small ? 'h-6 min-w-6 px-1.5 text-xs' : 'h-9 min-w-9 px-2 text-sm'
+      }`}
+    >
+      {children}
+    </span>
+  )
+}
+
+function Chip({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border bg-background py-1 pr-3 pl-1 text-sm">
+      {children}
+    </span>
   )
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { CameraStatusPanel } from '@/components/camera/CameraStatusPanel'
-import { ConnectionCard } from '@/components/connection/ConnectionCard'
+import { ConnectionDialog } from '@/components/connection/ConnectionDialog'
 import { SpeedControl } from '@/components/connection/SpeedControl'
 import { ControlsPanel } from '@/components/controls/ControlsPanel'
 import { PresetsPanel } from '@/components/presets/PresetsPanel'
@@ -48,11 +48,13 @@ export function MainScreen() {
         </Tabs>
       </div>
       <aside className="w-72 shrink-0 space-y-4 overflow-y-auto border-l bg-card p-4">
-        <ConnectionCard />
         <StatusSummary status={status} />
         <SpeedControl />
         <PresetsPanel />
-        <SettingsDialog />
+        <div className="space-y-2 border-t pt-4">
+          <ConnectionDialog />
+          <SettingsDialog />
+        </div>
       </aside>
     </div>
   )
