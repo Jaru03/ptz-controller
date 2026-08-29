@@ -55,7 +55,7 @@ _frontend_dist = PROJECT_ROOT / "frontend" / "dist"
 if _frontend_dist.is_dir():
     # Build estático de React/Vite que carga pywebview (utils/paths.py:
     # frontend_index_html()). Hay que generarlo antes de empaquetar con
-    # ``cd frontend && npm ci && npm run build``.
+    # ``cd frontend && pnpm install && pnpm run build``.
     datas.append((str(_frontend_dist), "frontend/dist"))
 
 hiddenimports = [
