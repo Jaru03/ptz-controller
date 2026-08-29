@@ -28,6 +28,9 @@ declare global {
           camera?: Partial<CameraSettings>
           movement?: Partial<import('./types').MovementSettings>
         }): Promise<AppSettings>
+        keyboard_requires_window_events(): Promise<boolean>
+        key_down(name: string): Promise<void>
+        key_up(name: string): Promise<void>
         get_controls_info(): Promise<ControlsInfo>
         get_version(): Promise<string>
         check_for_updates(): Promise<UpdateResult>

@@ -9,7 +9,7 @@ from config.settings import KeyboardConfig
 from controllers.base import MovementState
 from controllers.keyboard_controller import (
     KeyboardController,
-    QtKeyboardController,
+    WindowKeyboardController,
     create_keyboard_controller,
     hotkey_for_preset,
     key_aliases,
@@ -315,7 +315,7 @@ def test_hotkey_for_preset_uses_position_and_explicit_map() -> None:
     assert hotkey_for_preset(config, 12, "PresetM") == "f1"
 
 
-def test_create_keyboard_controller_prefers_qt_on_wayland(
+def test_create_keyboard_controller_prefers_window_on_wayland(
     monkeypatch,
 ) -> None:
     monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
@@ -323,7 +323,7 @@ def test_create_keyboard_controller_prefers_qt_on_wayland(
     config = KeyboardConfig()
     state = MovementState(deadzone=0.0, publish=bus.send)
     controller = create_keyboard_controller(config, state, bus)
-    assert isinstance(controller, QtKeyboardController)
+    assert isinstance(controller, WindowKeyboardController)
 
 
 def test_create_keyboard_controller_uses_pynput_off_wayland(
@@ -336,6 +336,6 @@ def test_create_keyboard_controller_uses_pynput_off_wayland(
     state = MovementState(deadzone=0.0, publish=bus.send)
     controller = create_keyboard_controller(config, state, bus)
     try:
-        assert not isinstance(controller, QtKeyboardController)
+        assert not isinstance(controller, WindowKeyboardController)
     finally:
         controller.stop()

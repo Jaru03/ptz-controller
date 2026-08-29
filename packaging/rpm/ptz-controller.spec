@@ -44,6 +44,13 @@ Requires:       dbus-libs%{?_isa}
 Requires:       mesa-libGL%{?_isa}
 Requires:       mesa-libEGL%{?_isa}
 
+# Backend GTK de pywebview, para el modo --web-gui (opcional mientras la
+# GUI PySide6 siga siendo la que arranca por defecto). PyInstaller no
+# empaqueta bibliotecas de sistema de GTK/WebKit, así que hacen falta
+# instaladas en la máquina del usuario. Nombres verificados en Fedora.
+Requires:       webkit2gtk4.1%{?_isa}
+Requires:       python3-gobject%{?_isa}
+
 %description
 Controlador de cámaras PTZ compatibles con ONVIF: teclado (WASD) y mando
 SDL, movimiento proporcional, presets y una interfaz PySide6 con vista

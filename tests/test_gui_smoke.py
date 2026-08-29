@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication, QGroupBox, QLineEdit
 from camera.mock_ptz import MockPTZController
 from config.settings import Settings
 from controllers.base import MovementState
-from controllers.keyboard_controller import QtKeyboardController
+from controllers.keyboard_controller import WindowKeyboardController
 from core.event_bus import EventBus
 from core.ref import Ref
 from gui.main_window import MainWindow
@@ -38,7 +38,7 @@ def _build_window(app: QApplication):
     ref = Ref(mock)
     settings = Settings.defaults()
     movement = MovementState(settings.movement.deadzone, bus.send)
-    keyboard = QtKeyboardController(settings.keyboard, movement, bus)
+    keyboard = WindowKeyboardController(settings.keyboard, movement, bus)
     window = MainWindow(ref, bus, settings, keyboard, "config.yaml", poll_interval_ms=33)
     return bus, mock, window
 

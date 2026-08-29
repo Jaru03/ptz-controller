@@ -17,6 +17,7 @@ from pathlib import Path
 
 from camera.discovery import discover_devices
 from config.settings import Settings
+from controllers.keyboard_controller import KeyboardController
 from core.event_bus import EventBus
 from gui_web.serialize import to_json_safe
 from models.commands import (
@@ -38,10 +39,17 @@ log = get_logger(__name__)
 class Api:
     """Métodos invocables desde JS vía ``window.pywebview.api``."""
 
-    def __init__(self, bus: EventBus, settings: Settings, config_path: Path) -> None:
+    def __init__(
+        self,
+        bus: EventBus,
+        settings: Settings,
+        config_path: Path,
+        keyboard: KeyboardController | None = None,
+    ) -> None:
         self._bus = bus
         self._settings = settings
         self._config_path = config_path
+        self._keyboard = keyboard
 
     # -- Conexión -----------------------------------------------------
 
@@ -144,6 +152,28 @@ class Api:
 
         self._settings.save(self._config_path)
         return self._settings.to_dict()
+
+    # -- Teclado (backend "window") ------------------------------------------
+
+    def keyboard_requires_window_events(self) -> bool:
+        """Indica si el controlador de teclado en marcha necesita que el
+        frontend le reenvíe los ``keydown``/``keyup`` de JS.
+
+        Se consulta el controlador en marcha, no ``settings.keyboard.
+        backend``: con backend 'auto' el valor configurado no dice cuál
+        de los dos (pynput o ventana) terminó arrancando en este intento
+        concreto — es la misma comprobación que hacía
+        ``MainWindow.eventFilter`` con ``self._keyboard.requires_window_events``.
+        """
+        return bool(self._keyboard and self._keyboard.requires_window_events)
+
+    def key_down(self, name: str) -> None:
+        if self._keyboard is not None and self._keyboard.requires_window_events:
+            self._keyboard.on_key_down(name)
+
+    def key_up(self, name: str) -> None:
+        if self._keyboard is not None and self._keyboard.requires_window_events:
+            self._keyboard.on_key_up(name)
 
     # -- Controles (referencia de solo lectura) ------------------------------
 

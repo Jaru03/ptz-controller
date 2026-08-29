@@ -148,10 +148,11 @@ en `config.yaml` → `joystick.device_overrides`.
 
 - `auto` (por defecto): intenta **pynput** (teclado global). Si no puede
   arrancar (p. ej. Wayland sin X11 o sin permisos del grupo `input`),
-  cae automáticamente a la captura de eventos de la **ventana Qt**, que
+  cae automáticamente a la captura de eventos de la **ventana**, que
   funciona en cualquier entorno con foco en la aplicación.
 - `pynput`: solo teclado global.
-- `qt`: solo eventos de la ventana.
+- `window`: solo eventos de la ventana (se llamaba `qt` antes de la
+  migración a pywebview; ese valor se sigue aceptando).
 
 ## Arquitectura
 
@@ -250,6 +251,6 @@ por IA o reconocimiento de gestos: basta con añadir nuevos
 - Las cámaras varían en su soporte ONVIF; los errores SOAP se registran y
   se muestran en la interfaz.
 - El teclado global (pynput) puede requerir X11 o pertenecer al grupo
-  `input` en Linux; el backend `qt` no tiene ese requisito.
+  `input` en Linux; el backend `window` no tiene ese requisito.
 - No expongas credenciales de cámara en repositorios públicos: `config.yaml`
   está pensado para el usuario, no para versionarse con secretos.

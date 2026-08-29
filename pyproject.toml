@@ -15,12 +15,6 @@ dependencies = [
     "PyYAML>=6.0",
     "opencv-python>=4.10",
     "pywebview>=6.2.1",
-    # Backend GTK de pywebview, solo en Linux (Windows usa Edge WebView2 vía
-    # su propio backend, y pygobject no se instala igual ahí). Requiere
-    # las cabeceras de desarrollo del sistema (gobject-introspection-devel,
-    # cairo-gobject-devel, python3-devel o equivalentes) para compilarse.
-    "pygobject>=3.58.0; sys_platform == 'linux'",
-    "pycairo>=1.29.1; sys_platform == 'linux'",
 ]
 
 [project.scripts]
@@ -32,6 +26,18 @@ dev = [
 ]
 build = [
     "pyinstaller>=6.11",
+]
+# Backend GTK de pywebview, solo en Linux (Windows usa Edge WebView2 vía su
+# propio backend). Aparte de "dependencies" a propósito: requiere cabeceras
+# de desarrollo del sistema (gobject-introspection-devel/
+# libgirepository*-dev, cairo-gobject-devel/libcairo2-dev, python3-devel)
+# que la CI de tests no tiene por qué instalar solo para que "uv sync"
+# resuelva — pytest no importa pywebview/gi en ningún punto. Necesario
+# solo para ejecutar --web-gui en desarrollo y para empaquetar
+# (packaging/build.py).
+gtk = [
+    "pygobject>=3.58.0; sys_platform == 'linux'",
+    "pycairo>=1.29.1; sys_platform == 'linux'",
 ]
 
 [build-system]

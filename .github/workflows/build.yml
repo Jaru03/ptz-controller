@@ -29,6 +29,37 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        run: |
+          npm ci
+          npm run build
+        working-directory: frontend
+        shell: bash
+
+      # GTK/WebKit para el backend de pywebview en Linux (Windows usa Edge
+      # WebView2, ya presente en el runner). Va ANTES de "uv sync": pygobject
+      # compila una extensión C contra libgirepository/cairo al instalarse,
+      # no solo en tiempo de ejecución, así que hacen falta también los
+      # paquetes "-dev". Nombres verificados contra Ubuntu 24.04 (noble); si
+      # ubuntu-latest cambia de imagen y esto empieza a fallar, es el primer
+      # sitio donde mirar.
+      - name: GTK/WebKit + Qt system deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1 \
+            libgirepository1.0-dev libcairo2-dev pkg-config python3-dev \
+            libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1
+        shell: bash
+
       - name: Install uv (Python 3.13)
         uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -36,14 +67,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --group dev --group build
-
-      - name: Qt system deps (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1
-        shell: bash
+        run: uv sync --group dev --group build --group gtk
 
       - name: Build executable
         run: uv run --group build python packaging/build.py --clean
@@ -51,7 +75,10 @@ jobs:
 
       # Comprobación de humo: el binario debe arrancar, crear su
       # configuración en el directorio del usuario y cerrarse solo. Si
-      # faltara un WSDL o un módulo oculto, fallaría aquí.
+      # faltara un WSDL o un módulo oculto, fallaría aquí. Se prueba tanto
+      # la GUI PySide6 (por defecto, todavía activa) como la web
+      # (--web-gui): así un frontend/dist mal empaquetado también se
+      # detecta aquí, no solo al usarlo.
       - name: Smoke test (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -62,6 +89,14 @@ jobs:
           kill "$pid" 2>/dev/null || true
           test -f "$HOME/.config/ptz-controller/config.yaml"
           echo "El ejecutable arrancó y creó su configuración."
+
+          rm -f "$HOME/.config/ptz-controller/logs/ptz-controller.log"
+          timeout 60 xvfb-run -a ./dist/ptz-controller --web-gui --mock --no-joystick &
+          pid=$!
+          sleep 20
+          kill "$pid" 2>/dev/null || true
+          grep -q "Aplicación iniciada" "$HOME/.config/ptz-controller/logs/ptz-controller.log"
+          echo "El ejecutable arrancó con --web-gui."
         shell: bash
 
       # El RPM para Fedora se genera aquí (misma arquitectura x86_64 que
@@ -87,6 +122,20 @@ jobs:
           $config = Join-Path $env:APPDATA 'ptz-controller\config.yaml'
           if (-not (Test-Path $config)) { throw "No se creó $config" }
           Write-Host 'El ejecutable arrancó y creó su configuración.'
+
+          $logPath = Join-Path $env:APPDATA 'ptz-controller\logs\ptz-controller.log'
+          Remove-Item -Path $logPath -ErrorAction SilentlyContinue
+          $process = Start-Process -FilePath .\dist\ptz-controller.exe `
+            -ArgumentList '--web-gui','--mock','--no-joystick' -PassThru
+          Start-Sleep -Seconds 20
+          if ($process.HasExited -and $process.ExitCode -ne 0) {
+            throw "El ejecutable (--web-gui) terminó con código $($process.ExitCode)"
+          }
+          Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          if (-not (Select-String -Path $logPath -Pattern 'Aplicación iniciada' -Quiet)) {
+            throw "No se encontró 'Aplicación iniciada' en $logPath"
+          }
+          Write-Host 'El ejecutable arrancó con --web-gui.'
         shell: pwsh
 
       # Un único archivo por plataforma con el ejecutable y su instalador

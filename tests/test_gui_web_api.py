@@ -250,3 +250,65 @@ def test_open_releases_page_opens_the_browser(monkeypatch, tmp_path) -> None:
 
     assert result == {"ok": True}
     assert opened == [api_module.RELEASES_PAGE]
+
+
+class _FakeKeyboard:
+    def __init__(self, requires_window_events: bool) -> None:
+        self.requires_window_events = requires_window_events
+        self.down: list[str] = []
+        self.up: list[str] = []
+
+    def on_key_down(self, name: str) -> None:
+        self.down.append(name)
+
+    def on_key_up(self, name: str) -> None:
+        self.up.append(name)
+
+
+def test_keyboard_requires_window_events_reflects_the_live_controller(tmp_path) -> None:
+    bus = EventBus()
+    settings = Settings.defaults()
+
+    without_keyboard = Api(bus, settings, tmp_path / "config.yaml")
+    assert without_keyboard.keyboard_requires_window_events() is False
+
+    with_pynput = Api(bus, settings, tmp_path / "config.yaml", keyboard=_FakeKeyboard(False))
+    assert with_pynput.keyboard_requires_window_events() is False
+
+    with_window = Api(bus, settings, tmp_path / "config.yaml", keyboard=_FakeKeyboard(True))
+    assert with_window.keyboard_requires_window_events() is True
+
+
+def test_key_down_up_forward_only_when_backend_requires_window_events(tmp_path) -> None:
+    bus = EventBus()
+    settings = Settings.defaults()
+    window_keyboard = _FakeKeyboard(True)
+    api = Api(bus, settings, tmp_path / "config.yaml", keyboard=window_keyboard)
+
+    api.key_down("w")
+    api.key_up("w")
+
+    assert window_keyboard.down == ["w"]
+    assert window_keyboard.up == ["w"]
+
+
+def test_key_down_up_are_ignored_for_pynput_backend(tmp_path) -> None:
+    bus = EventBus()
+    settings = Settings.defaults()
+    pynput_keyboard = _FakeKeyboard(False)
+    api = Api(bus, settings, tmp_path / "config.yaml", keyboard=pynput_keyboard)
+
+    api.key_down("w")
+    api.key_up("w")
+
+    assert pynput_keyboard.down == []
+    assert pynput_keyboard.up == []
+
+
+def test_key_down_up_are_ignored_without_a_keyboard_controller(tmp_path) -> None:
+    bus = EventBus()
+    settings = Settings.defaults()
+    api = Api(bus, settings, tmp_path / "config.yaml")
+
+    api.key_down("w")  # no debe lanzar
+    api.key_up("w")

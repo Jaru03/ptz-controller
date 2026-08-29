@@ -40,6 +40,9 @@ export const api = {
     camera?: Partial<CameraSettings>
     movement?: Partial<MovementSettings>
   }): Promise<AppSettings> => call((a) => a.save_settings(patch)),
+  keyboardRequiresWindowEvents: (): Promise<boolean> => call((a) => a.keyboard_requires_window_events()),
+  keyDown: (name: string) => call((a) => a.key_down(name)),
+  keyUp: (name: string) => call((a) => a.key_up(name)),
   getControlsInfo: (): Promise<ControlsInfo> => call((a) => a.get_controls_info()),
   getVersion: (): Promise<string> => call((a) => a.get_version()),
   checkForUpdates: (): Promise<UpdateResult> => call((a) => a.check_for_updates()),

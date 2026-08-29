@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { UpdatesPanel } from '@/components/updates/UpdatesPanel'
 import { VideoPanel } from '@/components/video/VideoPanel'
 import { useBusEvent } from '@/hooks/useBusEvent'
+import { useWindowKeyboard } from '@/hooks/useWindowKeyboard'
 import type { PtzStatus } from '@/lib/types'
 
 /**
@@ -20,6 +21,7 @@ import type { PtzStatus } from '@/lib/types'
 export function MainScreen() {
   const [status, setStatus] = useState<PtzStatus | null>(null)
   useBusEvent<PtzStatus>('ptz.status', setStatus)
+  useWindowKeyboard()
 
   return (
     <div className="flex h-svh w-full bg-background text-foreground">
