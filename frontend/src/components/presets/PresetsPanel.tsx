@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { KeyCap } from '@/components/ui/keycap'
 import { Label } from '@/components/ui/label'
 import { useBusEvent } from '@/hooks/useBusEvent'
 import { api } from '@/lib/api'
@@ -80,11 +81,12 @@ export function PresetsPanel() {
             type="button"
             onDoubleClick={() => goto(preset.token)}
             onClick={() => setSelected(preset.token)}
-            className={`block w-full rounded px-2 py-1 text-left text-sm hover:bg-accent ${
+            className={`flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent ${
               selected === preset.token ? 'bg-accent' : ''
             }`}
           >
-            {preset.name || `Preset ${preset.token}`} <span className="text-muted-foreground">[{preset.token}]</span>
+            <span className="truncate">{preset.name || `Preset ${preset.token}`}</span>
+            <KeyCap small>{preset.token}</KeyCap>
           </button>
         ))}
       </div>

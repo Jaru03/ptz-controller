@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Gamepad2, Keyboard } from 'lucide-react'
 import { GamepadDiagram } from '@/components/controls/GamepadDiagram'
+import { Chip, KeyCap } from '@/components/ui/keycap'
 import { keyLabel } from '@/lib/keymap'
 import { api } from '@/lib/api'
 import type { ControlsInfo } from '@/lib/types'
@@ -132,22 +133,3 @@ function LabeledKey({ keyName, caption }: { keyName: string; caption: string }) 
   )
 }
 
-function KeyCap({ children, small }: { children: React.ReactNode; small?: boolean }) {
-  return (
-    <span
-      className={`inline-flex items-center justify-center rounded-md border bg-background font-mono font-medium shadow-[0_2px_0_0] shadow-border ${
-        small ? 'h-6 min-w-6 px-1.5 text-xs' : 'h-9 min-w-9 px-2 text-sm'
-      }`}
-    >
-      {children}
-    </span>
-  )
-}
-
-function Chip({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border bg-background py-1 pr-3 pl-1 text-sm">
-      {children}
-    </span>
-  )
-}

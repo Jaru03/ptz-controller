@@ -14,9 +14,9 @@ import type { PtzStatus } from '@/lib/types'
 
 /**
  * Vista principal (equivalente a gui/main_window.py::MainWindow):
- * pestañas a la izquierda (Vista previa/Simulación/Controles/
- * Actualizaciones) + panel de control a la derecha (conexión, estado,
- * velocidad, presets, ajustes).
+ * pestañas a la izquierda (Cámara/Simulación/Controles/Actualizaciones)
+ * + panel de control a la derecha (conexión, estado, velocidad,
+ * presets, ajustes).
  */
 export function MainScreen() {
   const [status, setStatus] = useState<PtzStatus | null>(null)
@@ -28,7 +28,7 @@ export function MainScreen() {
       <div className="min-w-0 flex-1 p-4">
         <Tabs defaultValue="camera" className="h-full">
           <TabsList>
-            <TabsTrigger value="video">Vista previa</TabsTrigger>
+            <TabsTrigger value="video">Cámara</TabsTrigger>
             <TabsTrigger value="camera">Simulación</TabsTrigger>
             <TabsTrigger value="controls">Controles</TabsTrigger>
             <TabsTrigger value="updates">Actualizaciones</TabsTrigger>
