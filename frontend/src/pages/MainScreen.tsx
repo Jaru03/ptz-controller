@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { CameraStatusPanel } from '@/components/camera/CameraStatusPanel'
+import { VideoPanel } from '@/components/video/VideoPanel'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useBusEvent } from '@/hooks/useBusEvent'
 import type { PtzStatus } from '@/lib/types'
@@ -27,7 +28,7 @@ export function MainScreen() {
             <TabsTrigger value="updates">Actualizaciones</TabsTrigger>
           </TabsList>
           <TabsContent value="video" className="h-[calc(100%-2.5rem)]">
-            <PlaceholderPanel text="Vista previa de vídeo — Fase 3" />
+            <VideoPanel />
           </TabsContent>
           <TabsContent value="camera" className="h-[calc(100%-2.5rem)]">
             <CameraStatusPanel />

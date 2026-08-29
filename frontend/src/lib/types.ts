@@ -52,3 +52,9 @@ export interface PtzStatus {
   input_active: string
   presets: PresetInfo[]
 }
+
+/** Payload de gui.streamState (gui_web/video_controller.py). */
+export interface StreamState {
+  status: 'stopped' | 'connecting' | 'streaming' | 'error'
+  message: string
+}

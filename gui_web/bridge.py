@@ -33,6 +33,7 @@ _BRIDGED_TOPICS = (
     "ptz.stream",
     "gui.discovery",
     "gui.error",
+    "gui.streamState",
     "command.quit",
 )
 

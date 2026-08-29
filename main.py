@@ -33,6 +33,8 @@ from gui.main_window import MainWindow
 from gui_web.api import Api
 from gui_web.bridge import EventBridge
 from gui_web.poller import StatusPoller
+from gui_web.video_controller import VideoController
+from gui_web.video_server import VideoHttpServer
 from models.commands import ConnectCommand, PTZStatus, QuitCommand
 from utils.logger import get_logger, setup_logging
 from utils.paths import (
@@ -188,6 +190,15 @@ def _run_web_gui(
         ),
     )
 
+    video_server = VideoHttpServer()
+    video_server.start()
+    video_controller = VideoController(
+        bus,
+        video_server,
+        fps=settings.gui.video_fps,
+        transport=settings.gui.rtsp_transport,
+    )
+
     quit_guard = {"done": False}
 
     def on_quit() -> None:
@@ -196,6 +207,8 @@ def _run_web_gui(
         quit_guard["done"] = True
         log.info("Cerrando aplicación…")
         poller.stop()
+        video_controller.stop()
+        video_server.stop()
         keyboard.stop()
         if joystick is not None:
             joystick.stop()
@@ -215,7 +228,7 @@ def _run_web_gui(
 
     window = webview.create_window(
         "Controlador de cámaras PTZ ONVIF",
-        url=index_html.as_uri(),
+        url=f"{index_html.as_uri()}?videoPort={video_server.port}",
         js_api=api,
         width=1100,
         height=720,
@@ -223,14 +236,23 @@ def _run_web_gui(
     window_ref["window"] = window
     window.events.closed += lambda: bus.send(QuitCommand())
 
-    # Estado inicial, igual que MainWindow.__init__: así el frontend no
-    # arranca vacío a la espera del primer tick del poller.
-    bus.publish("ptz.status", ref.value.get_status())
-    bus.publish("ptz.presets", ref.value.list_presets())
+    def on_started() -> None:
+        # Estado inicial, igual que MainWindow.__init__: así el frontend
+        # no arranca vacío a la espera del primer tick del poller.
+        #
+        # Tiene que ir en el callback de arranque de webview.start(), NO
+        # justo tras create_window: publicar antes de que el bucle de
+        # eventos de GTK esté corriendo hace que EventBridge llame a
+        # evaluate_js() sobre una ventana que aún no puede atenderlo, y
+        # evaluate_js() se queda bloqueado para siempre (confirmado con
+        # un script de prueba aislado: colgaba justo ahí, de forma no
+        # determinista según el timing).
+        bus.publish("ptz.status", ref.value.get_status())
+        bus.publish("ptz.presets", ref.value.list_presets())
+        poller.start()
 
     log.info("Aplicación iniciada (web-gui)")
-    poller.start()
-    webview.start(debug=not is_frozen())
+    webview.start(on_started, debug=not is_frozen())
     on_quit()
     log.info("Aplicación finalizada")
     return 0

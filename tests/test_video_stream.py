@@ -1,16 +1,10 @@
-"""Pruebas del widget de vídeo RTSP."""
+"""Pruebas de la captura de vídeo RTSP (core/video_stream.py, sin GUI)."""
 
 import logging
 import os
 import time
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
-from gui.video_widget import (
-    VideoStreamThread,
-    build_ffmpeg_loglevel,
-    build_ffmpeg_options,
-)
+from core.video_stream import VideoStreamThread, build_ffmpeg_loglevel, build_ffmpeg_options
 from utils.logger import APP_LOGGER_NAME
 
 
@@ -57,10 +51,11 @@ def test_ffmpeg_loglevel_verbose_in_debug(monkeypatch) -> None:
     assert build_ffmpeg_loglevel() == "32"
 
 
-def test_open_capture_sets_ffmpeg_options(monkeypatch) -> None:
+def test_open_capture_sets_ffmpeg_options_and_buffer_size(monkeypatch) -> None:
     import cv2
 
     opened: list[str] = []
+    buffer_sizes: list[float] = []
 
     class FakeCapture:
         def __init__(self, url, api):
@@ -69,12 +64,19 @@ def test_open_capture_sets_ffmpeg_options(monkeypatch) -> None:
         def isOpened(self):
             return True
 
+        def set(self, prop, value):
+            if prop == cv2.CAP_PROP_BUFFERSIZE:
+                buffer_sizes.append(value)
+
     monkeypatch.setattr(cv2, "VideoCapture", FakeCapture)
     thread = VideoStreamThread("rtsp://cam/stream", transport="udp")
     thread._open_capture()
     assert opened == ["rtsp://cam/stream"]
     assert os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] == build_ffmpeg_options("udp")
     assert "OPENCV_FFMPEG_LOGLEVEL" in os.environ
+    # Sin esto el búfer de OpenCV/FFmpeg va acumulando frames y el vídeo
+    # se ve cada vez más retrasado (ver core/video_stream.py).
+    assert buffer_sizes == [1]
 
 
 def test_consume_does_not_throttle_reads(monkeypatch) -> None:
@@ -96,14 +98,14 @@ def test_consume_does_not_throttle_reads(monkeypatch) -> None:
     thread = VideoStreamThread("rtsp://cam/stream", fps=1)
     thread._running = True
     emitted: list[object] = []
-    thread.frame_ready.connect(emitted.append)
+    thread._on_frame = emitted.append
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
 
     capture = FakeCapture()
     thread._consume(capture)
 
     assert capture.reads > frames  # se leyeron todos los frames disponibles
-    assert len(emitted) <= 2  # pero a la GUI solo va el ritmo de fps
+    assert len(emitted) <= 2  # pero solo se entrega al ritmo de fps
 
 
 def test_consume_tolerates_transient_read_failures(monkeypatch) -> None:
@@ -123,8 +125,15 @@ def test_consume_tolerates_transient_read_failures(monkeypatch) -> None:
 
     thread = VideoStreamThread("rtsp://cam/stream", fps=30)
     thread._running = True
-    thread.frame_ready.connect(lambda _image: None)
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
 
     thread._consume(FakeCapture())
     assert results == []  # un fallo aislado no corta el stream; tres seguidos sí
+
+
+def test_on_frame_on_error_on_stopped_default_to_noop() -> None:
+    """Sin callables explícitos, el hilo no debe lanzar al invocarlos."""
+    thread = VideoStreamThread("rtsp://cam/stream")
+    thread._on_frame(object())
+    thread._on_error("algo falló")
+    thread._on_stopped()
