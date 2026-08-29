@@ -151,11 +151,16 @@ def _run_gui(
     """Arranca el frontend (React) dentro de una ventana pywebview."""
     import webview
 
+    # DevTools disponible en desarrollo (clic derecho -> Inspeccionar) pero
+    # sin abrirse solo al arrancar: por defecto pywebview lo abre
+    # automáticamente en cuanto debug=True (ver más abajo).
+    webview.settings["OPEN_DEVTOOLS_IN_DEBUG"] = False
+
     index_html = frontend_index_html()
     if not index_html.is_file():
         log.error(
             "No se encuentra %s: compile el frontend antes de arrancar "
-            "('cd frontend && npm install && npm run build')",
+            "('cd frontend && pnpm install && pnpm run build')",
             index_html,
         )
         return 1
