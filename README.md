@@ -53,7 +53,7 @@ Ahí se indican la IP, el usuario y la contraseña de la cámara.
 ```bash
 cd ptz-controller
 uv sync --group dev --group gtk   # --group gtk solo hace falta en Linux
-cd frontend && npm install && npm run build && cd ..
+cd frontend && pnpm install && pnpm run build && cd ..
 uv run python main.py
 ```
 
@@ -74,8 +74,8 @@ siguen viviendo en la raíz del proyecto, como siempre.
 
 ```bash
 uv sync --group build --group gtk
-cd frontend && npm install && npm run build && cd ..
-uv run --group build python packaging/build.py --clean
+cd frontend && pnpm install && pnpm run build && cd ..
+uv run --group build python packaging/build.py --clean --skip-icons
 ```
 
 Deja `dist/ptz-controller` (o `dist/ptz-controller.exe`), un binario
@@ -262,7 +262,7 @@ uv run pytest
 Cubren el bus de eventos, los comandos, la configuración YAML, el
 controlador simulado, la capa de entrada y el puente Python↔JS
 (`gui_web/`, sin necesitar abrir ninguna ventana real). El frontend
-(`frontend/`) se verifica con `npm run build` (comprobación de tipos)
+(`frontend/`) se verifica con `pnpm run build` (comprobación de tipos)
 más revisión manual en navegador; no tiene tests automatizados propios
 todavía.
 

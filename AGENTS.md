@@ -21,7 +21,7 @@ desarrollar sin hardware.
 
 ```bash
 uv sync --group dev --group gtk     # --group gtk solo hace falta en Linux
-cd frontend && npm install && npm run build && cd ..
+cd frontend && pnpm install && pnpm run build && cd ..
 uv run python main.py               # modo simulado (Mock)
 uv run python main.py --real        # cámara real ONVIF (config.yaml)
 uv run python main.py --log-level DEBUG
@@ -424,7 +424,7 @@ DEBUG` se ven los `ContinuousMove` / `RelativeMove` que salen.
   para errores variados de red/SOAP.
 - No añadir comentarios innecesarios al código.
 - Ejecutar siempre `uv run pytest` tras cambios en Python; si se toca el
-  frontend, `cd frontend && npm run build` (comprobación de tipos) y
+  frontend, `cd frontend && pnpm run build` (comprobación de tipos) y
   revisión manual en navegador (no hay tests automatizados del frontend
   todavía).
 - Ninguna petición ONVIF en el hilo de la GUI: pasar por el
