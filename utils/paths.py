@@ -82,3 +82,14 @@ def bundled_file(*parts: str) -> Path | None:
     """Devuelve un recurso empaquetado si existe (None si falta)."""
     candidate = resource_dir().joinpath(*parts)
     return candidate if candidate.is_file() else None
+
+
+def frontend_index_html() -> Path:
+    """Ruta al ``index.html`` del frontend (React/Vite) que carga pywebview.
+
+    En desarrollo hay que generarlo antes con ``cd frontend && npm run
+    build``; en el ejecutable congelado, PyInstaller lo copia dentro del
+    paquete (ver ``packaging/ptz-controller.spec``). Una sola expresión
+    sirve para ambos casos, igual que ``bundled_file``.
+    """
+    return resource_dir() / "frontend" / "dist" / "index.html"

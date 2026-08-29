@@ -51,12 +51,22 @@ datas = [
 # zeep lee sus XSD/XML de plantilla en tiempo de ejecución.
 datas += collect_data_files("zeep")
 
+_frontend_dist = PROJECT_ROOT / "frontend" / "dist"
+if _frontend_dist.is_dir():
+    # Build estático de React/Vite que carga pywebview (utils/paths.py:
+    # frontend_index_html()). Hay que generarlo antes de empaquetar con
+    # ``cd frontend && npm ci && npm run build``.
+    datas.append((str(_frontend_dist), "frontend/dist"))
+
 hiddenimports = [
     "onvif",
     "zeep",
     "zeep.transports",
     # onvif-zeep resuelve los servicios por nombre en tiempo de ejecución.
     *collect_submodules("onvif"),
+    # Backend GTK de pywebview en Linux (en Windows usa Edge WebView2 vía
+    # su propio backend, sin necesitar esto).
+    *collect_submodules("webview"),
 ]
 
 excludes = [

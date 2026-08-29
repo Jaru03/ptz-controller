@@ -14,6 +14,13 @@ dependencies = [
     "PySide6>=6.8",
     "PyYAML>=6.0",
     "opencv-python>=4.10",
+    "pywebview>=6.2.1",
+    # Backend GTK de pywebview, solo en Linux (Windows usa Edge WebView2 vía
+    # su propio backend, y pygobject no se instala igual ahí). Requiere
+    # las cabeceras de desarrollo del sistema (gobject-introspection-devel,
+    # cairo-gobject-devel, python3-devel o equivalentes) para compilarse.
+    "pygobject>=3.58.0; sys_platform == 'linux'",
+    "pycairo>=1.29.1; sys_platform == 'linux'",
 ]
 
 [project.scripts]
