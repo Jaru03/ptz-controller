@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import shutil
-import sys
 from pathlib import Path
 from typing import Any, Callable
 
@@ -102,7 +101,7 @@ def resolve_mock(args: argparse.Namespace, settings: Settings) -> bool:
 
     Precedencia: ``--mock`` y ``--real`` explicitos y, si no se indica
     nada, la configuración en desarrollo. El ejecutable empaquetado
-    (PyInstaller, ``sys.frozen``) arranca en modo real por defecto:
+    (PyInstaller, ``is_frozen()``) arranca en modo real por defecto:
     así el binario publicado controla la cámara ONVIF sin más
     argumentos y ``--mock`` queda reservado para pruebas de humo.
     """
@@ -110,7 +109,7 @@ def resolve_mock(args: argparse.Namespace, settings: Settings) -> bool:
         return True
     if args.real:
         return False
-    return False if sys.frozen else settings.camera.mock
+    return False if is_frozen() else settings.camera.mock
 
 
 def create_ptz_controller(settings: Settings, mock: bool) -> PTZController:
