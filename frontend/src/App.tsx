@@ -1,40 +1,35 @@
-import { motion } from 'motion/react'
-import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
+import { useState } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
+import { ConnectionScreen } from '@/pages/ConnectionScreen'
+
+type View = 'connection' | 'main'
 
 /**
- * Página de prueba de la Fase 0: solo confirma que Vite + React +
- * Tailwind + shadcn/ui + Motion cargan correctamente dentro de pywebview
- * (vía file://) y en el ejecutable empaquetado con PyInstaller. Se
- * sustituye por ConnectionScreen/MainScreen en las fases siguientes.
+ * Ventana única con cambio de vista en el lado cliente (en vez de un
+ * segundo webview.create_window): evita duplicar el bridge/EventBridge y
+ * coincide con el flujo actual (ConnectionDialog -> MainWindow en el
+ * mismo proceso). MainScreen llega en la Fase 2.
  */
 function App() {
+  const [view, setView] = useState<View>('connection')
+
   return (
-    <div className="flex min-h-svh items-center justify-center bg-background p-6">
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35, ease: 'easeOut' }}
-      >
-        <Card className="w-96">
-          <CardHeader>
-            <CardTitle>Controlador PTZ</CardTitle>
-            <CardDescription>
-              Fase 0: scaffold de frontend funcionando dentro de pywebview.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button>Todo listo</Button>
-          </CardContent>
-        </Card>
-      </motion.div>
-    </div>
+    <AnimatePresence mode="wait">
+      {view === 'connection' ? (
+        <motion.div key="connection" exit={{ opacity: 0 }}>
+          <ConnectionScreen onConnected={() => setView('main')} />
+        </motion.div>
+      ) : (
+        <motion.div
+          key="main"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="flex min-h-svh items-center justify-center bg-background p-6 text-muted-foreground"
+        >
+          Conectado — la pantalla principal llega en la Fase 2.
+        </motion.div>
+      )}
+    </AnimatePresence>
   )
 }
 

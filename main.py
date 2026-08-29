@@ -14,7 +14,7 @@ import argparse
 import shutil
 import sys
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from PySide6.QtWidgets import QApplication, QDialog
 
@@ -30,9 +30,16 @@ from core.event_bus import EventBus
 from core.ref import Ref
 from gui.connection_dialog import ConnectionDialog
 from gui.main_window import MainWindow
-from models.commands import ConnectCommand, PTZStatus
+from gui_web.api import Api
+from models.commands import ConnectCommand, PTZStatus, QuitCommand
 from utils.logger import get_logger, setup_logging
-from utils.paths import bundled_file, default_config_path, default_log_dir
+from utils.paths import (
+    bundled_file,
+    default_config_path,
+    default_log_dir,
+    frontend_index_html,
+    is_frozen,
+)
 
 log = get_logger(__name__)
 
@@ -70,6 +77,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--no-joystick",
         action="store_true",
         help="No iniciar el controlador de joystick",
+    )
+    parser.add_argument(
+        "--web-gui",
+        action="store_true",
+        help=(
+            "Usar el frontend web (React/pywebview) en vez de la GUI "
+            "PySide6. Temporal, mientras dura la migración a pywebview."
+        ),
     )
     return parser.parse_args(argv)
 
@@ -128,6 +143,77 @@ def create_ptz_controller(settings: Settings, mock: bool) -> PTZController:
     )
     log.info("Modo cámara real (ONVIF) configurado para %s:%s", camera.ip, camera.port)
     return controller
+
+
+def _run_web_gui(
+    *,
+    bus: EventBus,
+    settings: Settings,
+    config_path: Path,
+    keyboard: Any,
+    joystick: JoystickController | None,
+    broker: PyGameEventBroker,
+    worker: CommandWorker,
+    ref: Ref,
+) -> int:
+    """Arranca el frontend web (React) dentro de una ventana pywebview.
+
+    Fase de migración: por ahora ``gui_web``/``frontend`` solo tienen la
+    pantalla de conexión (Fase 1 del plan), así que esto es un camino
+    alternativo detrás de ``--web-gui`` mientras la GUI PySide6
+    (``MainWindow``) sigue siendo la que arranca por defecto.
+    """
+    import webview
+
+    index_html = frontend_index_html()
+    if not index_html.is_file():
+        log.error(
+            "No se encuentra %s: compile el frontend antes de usar "
+            "--web-gui ('cd frontend && npm install && npm run build')",
+            index_html,
+        )
+        return 1
+
+    api = Api(bus, settings)
+
+    quit_guard = {"done": False}
+
+    def on_quit() -> None:
+        if quit_guard["done"]:
+            return
+        quit_guard["done"] = True
+        log.info("Cerrando aplicación…")
+        keyboard.stop()
+        if joystick is not None:
+            joystick.stop()
+        broker.stop()
+        worker.stop()
+        try:
+            ref.value.stop()
+            ref.value.disconnect()
+        except Exception:  # noqa: BLE001 - cierre tolerante a errores
+            pass
+        try:
+            settings.save(config_path)
+        except OSError as exc:
+            log.error("No se pudo guardar la configuración: %s", exc)
+
+    bus.subscribe("command.quit", lambda _cmd: on_quit())
+
+    window = webview.create_window(
+        "Controlador de cámaras PTZ ONVIF",
+        url=index_html.as_uri(),
+        js_api=api,
+        width=1100,
+        height=720,
+    )
+    window.events.closed += lambda: bus.send(QuitCommand())
+
+    log.info("Aplicación iniciada (web-gui)")
+    webview.start(debug=not is_frozen())
+    on_quit()
+    log.info("Aplicación finalizada")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -261,6 +347,18 @@ def main(argv: list[str] | None = None) -> int:
     bus.subscribe("command.setSpeed", lambda cmd: movement.set_speed(cmd.speed))
 
     # -- GUI --------------------------------------------------------------
+
+    if args.web_gui:
+        return _run_web_gui(
+            bus=bus,
+            settings=settings,
+            config_path=config_path,
+            keyboard=keyboard,
+            joystick=joystick,
+            broker=broker,
+            worker=worker,
+            ref=ref,
+        )
 
     app = QApplication(sys.argv[:1])
     app.setApplicationName("ptz-controller")
