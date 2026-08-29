@@ -56,6 +56,13 @@ jobs:
       # ubuntu-latest cambia de imagen y esto empieza a fallar, es el primer
       # sitio donde mirar.
       #
+      # libgirepository-2.0-dev (además del clásico libgirepository1.0-dev):
+      # pygobject >=3.52 compila contra la API girepository-2.0 (GObject-
+      # Introspection 1.80+, de GNOME 46) y su meson.build busca ese .pc por
+      # nombre exacto — sin el paquete "-2.0" el build falla con "Dependency
+      # 'girepository-2.0' is required but not found" aunque el 1.0 esté
+      # instalado.
+      #
       # libegl1/libgl1/libxkbcommon0/libdbus-1-3/libfontconfig1 no son por
       # PySide6 (ya no está): opencv-python trae su propio plugin Qt
       # (cv2/qt/plugins/platforms/libqxcb.so) que PyInstaller sigue
@@ -67,7 +74,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1 \
-            libgirepository1.0-dev libcairo2-dev pkg-config python3-dev \
+            libgirepository1.0-dev libgirepository-2.0-dev \
+            libcairo2-dev pkg-config python3-dev \
             libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1
         shell: bash
 

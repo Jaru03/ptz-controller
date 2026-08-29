@@ -36,7 +36,11 @@ uv run --group build python packaging/build_rpm.py # RPM Fedora (dist/rpm/RPMS)
 `--group gtk` instala `pygobject`/`pycairo` (backend GTK de pywebview en
 Linux); requiere cabeceras de desarrollo del sistema
 (`gobject-introspection-devel`/`libgirepository1.0-dev`,
-`cairo-gobject-devel`/`libcairo2-dev`, `python3-devel`) y, en tiempo de
+`cairo-gobject-devel`/`libcairo2-dev`, `python3-devel`) más
+`glib2-devel`/`libgirepository-2.0-dev` (API `girepository-2.0` que
+pygobject >=3.52 necesita para compilar; en Fedora la trae ya
+`gobject-introspection-devel` como dependencia, en Debian/Ubuntu hay que
+instalarla aparte — ver `.github/workflows/build.yml`) y, en tiempo de
 ejecución, WebKitGTK (`webkit2gtk4.1`/`gir1.2-webkit2-4.1`,
 `python3-gobject`/`python3-gi`). El frontend (`frontend/dist/`) hay que
 reconstruirlo tras cualquier cambio en `frontend/src/`.

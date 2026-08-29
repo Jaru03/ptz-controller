@@ -59,9 +59,13 @@ uv run python main.py
 
 `--group gtk` instala los bindings de Python para GTK que necesita
 pywebview en Linux (`pygobject`/`pycairo`); requiere tener instaladas las
-cabeceras de desarrollo del sistema (`gobject-introspection-devel`/
+cabeceras de desarrollo del sistema — `gobject-introspection-devel`/
 `libgirepository1.0-dev`, `cairo-gobject-devel`/`libcairo2-dev`,
-`python3-devel`) y, para que la ventana llegue a abrir, WebKitGTK en
+`python3-devel` — más `glib2-devel`/`libgirepository-2.0-dev`, que
+pygobject necesita para compilar (API `girepository-2.0`, de GLib 2.80+)
+pero que solo hay que instalar a mano en Debian/Ubuntu: en Fedora la
+trae ya `gobject-introspection-devel` como dependencia. Y, para que la
+ventana llegue a abrir, WebKitGTK en
 tiempo de ejecución (`webkit2gtk4.1`/`gir1.2-webkit2-4.1`,
 `python3-gobject`/`python3-gi`). En Windows no hace falta nada de esto:
 pywebview usa Edge WebView2, que ya viene instalado. El frontend
