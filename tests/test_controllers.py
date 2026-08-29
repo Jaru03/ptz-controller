@@ -1,9 +1,6 @@
 """Tests del estado de movimiento y del controlador de teclado."""
 
-import os
 import time
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from config.settings import KeyboardConfig
 from controllers.base import MovementState
@@ -13,7 +10,6 @@ from controllers.keyboard_controller import (
     create_keyboard_controller,
     hotkey_for_preset,
     key_aliases,
-    qt_key_name,
 )
 from core.event_bus import EventBus
 from models.commands import (
@@ -247,46 +243,6 @@ def test_keyboard_space_publishes_stop() -> None:
     controller.on_key_down("w")
     controller.on_key_down("space")
     assert isinstance(received[-1], StopCommand)
-
-
-def _key_event(key, text: str = "", keypad: bool = False):
-    """Construye un QKeyEvent real (los simulados ocultan modificadores)."""
-    from PySide6.QtCore import QEvent, Qt
-    from PySide6.QtGui import QKeyEvent
-
-    modifiers = (
-        Qt.KeyboardModifier.KeypadModifier
-        if keypad
-        else Qt.KeyboardModifier.NoModifier
-    )
-    return QKeyEvent(QEvent.Type.KeyPress, key, modifiers, text)
-
-
-def test_qt_key_name_conversion() -> None:
-    from PySide6.QtCore import Qt
-
-    assert qt_key_name(_key_event(Qt.Key_W, "W")) == "w"
-    assert qt_key_name(_key_event(Qt.Key_Space, " ")) == "space"
-    assert qt_key_name(_key_event(Qt.Key_Escape)) == "esc"
-    assert qt_key_name(_key_event(Qt.Key_F5)) == "f5"
-    assert qt_key_name(_key_event(Qt.Key_MediaPlay)) == ""
-
-
-def test_qt_key_name_numpad_with_numlock() -> None:
-    from PySide6.QtCore import Qt
-
-    # Con Bloq Num el pad escribe el mismo texto que la fila de dígitos.
-    assert qt_key_name(_key_event(Qt.Key_1, "1", keypad=True)) == "kp_1"
-    assert qt_key_name(_key_event(Qt.Key_1, "1")) == "1"
-
-
-def test_qt_key_name_numpad_without_numlock() -> None:
-    from PySide6.QtCore import Qt
-
-    # Sin Bloq Num el pad emite teclas de navegación y ningún texto.
-    assert qt_key_name(_key_event(Qt.Key_End, "", keypad=True)) == "kp_1"
-    assert qt_key_name(_key_event(Qt.Key_Down, "", keypad=True)) == "kp_2"
-    assert qt_key_name(_key_event(Qt.Key_Down, "")) == "down"
 
 
 def test_key_aliases_fall_back_from_numpad_to_digit() -> None:

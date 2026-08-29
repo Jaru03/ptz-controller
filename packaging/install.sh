@@ -122,8 +122,8 @@ DESKTOP
     info "La configuración se creará en ${CONFIG_DIR}/config.yaml"
     info "Edite ahí la IP, el usuario y la contraseña de su cámara."
     echo
-    info "Nota: la interfaz web (${APP_ID} --web-gui, opcional) necesita"
-    info "WebKitGTK instalado en el sistema (PyInstaller no lo empaqueta)."
+    info "Nota: la interfaz necesita WebKitGTK instalado en el sistema"
+    info "(PyInstaller no lo empaqueta). Si no abre, instálelo con:"
     info "Debian/Ubuntu: sudo apt install gir1.2-webkit2-4.1 python3-gi"
     info "Fedora:        sudo dnf install webkit2gtk4.1 python3-gobject"
 }

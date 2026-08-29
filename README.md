@@ -4,8 +4,9 @@ Controlador universal de cámaras PTZ compatibles con ONVIF.
 
 Permite controlar una cámara PTZ desde el **teclado** (WASD) o desde un
 **mando de juego** (DualShock 4/5, DualSense, Xbox o cualquier mando SDL),
-con movimiento proporcional, zona muerta, presets y una interfaz gráfica
-moderna (PySide6) con vista previa RTSP.
+con movimiento proporcional, zona muerta, presets y una interfaz web
+moderna (React + shadcn/ui, dentro de una ventana nativa con pywebview)
+con vista previa RTSP.
 
 Incluye un **modo simulado (Mock)** para desarrollar y probar sin
 disponer de una cámara física: la interfaz PTZ es independiente del
@@ -51,24 +52,38 @@ Ahí se indican la IP, el usuario y la contraseña de la cámara.
 
 ```bash
 cd ptz-controller
-uv sync --group dev
+uv sync --group dev --group gtk   # --group gtk solo hace falta en Linux
+cd frontend && npm install && npm run build && cd ..
+uv run python main.py
 ```
 
-En este modo la configuración y los logs siguen viviendo en la raíz del
-proyecto, como siempre.
+`--group gtk` instala los bindings de Python para GTK que necesita
+pywebview en Linux (`pygobject`/`pycairo`); requiere tener instaladas las
+cabeceras de desarrollo del sistema (`gobject-introspection-devel`/
+`libgirepository1.0-dev`, `cairo-gobject-devel`/`libcairo2-dev`,
+`python3-devel`) y, para que la ventana llegue a abrir, WebKitGTK en
+tiempo de ejecución (`webkit2gtk4.1`/`gir1.2-webkit2-4.1`,
+`python3-gobject`/`python3-gi`). En Windows no hace falta nada de esto:
+pywebview usa Edge WebView2, que ya viene instalado. El frontend
+(`frontend/dist/`) hay que reconstruirlo cada vez que cambie algo en
+`frontend/src/`; en el resto del código, `uv run python main.py` recoge
+los cambios directamente. En este modo la configuración y los logs
+siguen viviendo en la raíz del proyecto, como siempre.
 
 ### Construir el ejecutable
 
 ```bash
-uv sync --group build
+uv sync --group build --group gtk
+cd frontend && npm install && npm run build && cd ..
 uv run --group build python packaging/build.py --clean
 ```
 
 Deja `dist/ptz-controller` (o `dist/ptz-controller.exe`), un binario
-autocontenido de unos 175 MB que incluye Python, PySide6, OpenCV y los
-WSDL de ONVIF. PyInstaller **no** hace compilación cruzada: cada binario
-debe construirse en su plataforma. El workflow `Build` de GitHub Actions
-genera ambos y los publica al etiquetar una versión `vX.Y.Z`.
+autocontenido de unos 150 MB que incluye Python, el frontend
+compilado, OpenCV y los WSDL de ONVIF. PyInstaller **no** hace
+compilación cruzada: cada binario debe construirse en su plataforma. El
+workflow `Build` de GitHub Actions genera ambos y los publica al
+etiquetar una versión `vX.Y.Z`.
 
 ## Uso
 
@@ -168,8 +183,13 @@ ptz-controller/
 │   ├── mock_ptz.py            # Cámara simulada (Mock)
 │   └── discovery.py           # Descubrimiento WS-Discovery (UDP)
 ├── controllers/               # Entrada: teclado y joystick
-├── core/                      # EventBus (mediador), Ref y worker de comandos
-├── gui/                       # PySide6 (ventana, cámara, vídeo, ajustes)
+├── core/                      # EventBus (mediador), Ref, worker de comandos y captura de vídeo
+├── gui_web/                   # Puente Python↔JS (Api, EventBridge, servidor MJPEG)
+├── frontend/                  # Interfaz React + TypeScript + Tailwind + shadcn/ui
+│   └── src/
+│       ├── pages/             # ConnectionScreen, MainScreen
+│       ├── components/        # Paneles: cámara, vídeo, presets, ajustes, controles...
+│       └── lib/                # bridge.ts, api.ts, keymap.ts, tipos compartidos
 ├── utils/                     # Logging y resolución de rutas
 ├── packaging/                 # Ejecutable (PyInstaller), iconos e instaladores
 └── tests/                     # pytest
@@ -178,8 +198,8 @@ ptz-controller/
 Principios aplicados: SOLID, DRY, KISS, YAGNI, PEP 8, type hints y
 docstrings. La comunicación entre capas ocurre exclusivamente a través
 del `EventBus` (pub/sub): los controladores de entrada publican comandos,
-`main.py` los enruta al controlador PTZ activo y la GUI recibe
-instantáneas de estado (marshalled al hilo de la interfaz).
+`main.py` los enruta al controlador PTZ activo, y `gui_web/bridge.py`
+reenvía los eventos de estado al frontend (React) vía pywebview.
 
 ## Documentación por módulo
 
@@ -203,21 +223,28 @@ instantáneas de estado (marshalled al hilo de la interfaz).
 - **`controllers/base.py`** — `MovementState` (zona muerta re-escalada,
   emisión solo ante cambios de dirección y reenvío periódico) y
   `PresetRegistry` (posición → token ONVIF), usados por teclado y mando.
-- **`controllers/keyboard_controller.py`** — Backends pynput/Qt con la
-  misma lógica.
+- **`controllers/keyboard_controller.py`** — Backends pynput/ventana con
+  la misma lógica.
 - **`controllers/pygame_events.py`** — Bucle de eventos SDL compartido
   (driver dummy) con hotplug de mandos.
 - **`controllers/joystick_controller.py`** — Movimiento proporcional por
   ejes, zoom por gatillos, velocidad y presets por botones.
-- **`gui/main_window.py`** — Ventana principal, panel de control y
-  `QtEventBridge` (marshalling bus → señales Qt).
-- **`gui/camera_widget.py`** — Representación visual de la cámara (punto,
-  ejes, flechas, zoom, velocidad).
-- **`gui/video_widget.py`** — Vista previa RTSP con OpenCV en un hilo:
+- **`core/video_stream.py`** — Vista previa RTSP con OpenCV en un hilo:
   transporte configurable, timeouts de socket, reconexión con backoff y
-  limitación de fps solo en la emisión hacia la GUI.
-- **`gui/settings_dialog.py`** — Edición de IP/puerto/usuario/velocidad/
-  deadzone y guardado en YAML.
+  limitación de fps solo en la entrega de frames.
+- **`gui_web/bridge.py`** — `EventBridge`: reenvía los topics del bus al
+  frontend vía `window.evaluate_js(...)`.
+- **`gui_web/api.py`** — `Api`, expuesta como `window.pywebview.api`: cada
+  método corresponde a una acción de la interfaz (conectar, mover,
+  presets, ajustes, teclado...), enviada al `EventBus` con `bus.send`.
+- **`gui_web/video_server.py`** — Servidor HTTP local que sirve el vídeo
+  como MJPEG (`multipart/x-mixed-replace`) para el `<img>` del frontend.
+- **`frontend/src/pages/MainScreen.tsx`** — Pestañas (vista previa,
+  simulación, controles, actualizaciones) y panel lateral (conexión,
+  estado, velocidad, presets, ajustes).
+- **`frontend/src/components/camera/CameraStatusPanel.tsx`** —
+  Representación visual de la cámara en `<canvas>` (punto, ejes, flechas,
+  zoom, velocidad).
 - **`utils/logger.py`** — Logging a consola y archivo rotativo
   (`logs/ptz-controller.log`).
 - **`utils/paths.py`** — Decide dónde viven recursos, configuración y logs
@@ -233,8 +260,11 @@ uv run pytest
 ```
 
 Cubren el bus de eventos, los comandos, la configuración YAML, el
-controlador simulado, la capa de entrada y smoke tests de la GUI
-(plataforma Qt `offscreen`).
+controlador simulado, la capa de entrada y el puente Python↔JS
+(`gui_web/`, sin necesitar abrir ninguna ventana real). El frontend
+(`frontend/`) se verifica con `npm run build` (comprobación de tipos)
+más revisión manual en navegador; no tiene tests automatizados propios
+todavía.
 
 ## Futuras ampliaciones
 

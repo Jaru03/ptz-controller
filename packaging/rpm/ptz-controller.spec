@@ -1,9 +1,9 @@
 # Receta RPM de ptz-controller para Fedora (y derivados con rpmbuild).
 #
 # Empaqueta el binario autocontenido de PyInstaller (que ya incluye el
-# intérprete, PySide6, onvif-zeep y los WSDL), el icono y la entrada de
-# menú. Como PyInstaller no hace compilación cruzada, primero hay que
-# construir el binario en esta plataforma:
+# intérprete, el frontend React/pywebview, onvif-zeep y los WSDL), el
+# icono y la entrada de menú. Como PyInstaller no hace compilación
+# cruzada, primero hay que construir el binario en esta plataforma:
 #
 #     uv sync --group build
 #     uv run --group build python packaging/build.py --clean
@@ -36,25 +36,27 @@ Source0:        %{name}-%{version}.tar.gz
 # El binario PyInstaller está ligado a la arquitectura de compilación.
 BuildArch:      x86_64
 
-# Bibliotecas de sistema que PySide6/OpenCV esperan en el arranque; el
-# resto (Qt, libav, zeep) viaja dentro del binario.
+# Bibliotecas de sistema que opencv-python espera en el arranque (trae
+# su propio plugin Qt aunque la app nunca lo use); el resto (libav,
+# zeep) viaja dentro del binario.
 Requires:       libxkbcommon%{?_isa}
 Requires:       fontconfig%{?_isa}
 Requires:       dbus-libs%{?_isa}
 Requires:       mesa-libGL%{?_isa}
 Requires:       mesa-libEGL%{?_isa}
 
-# Backend GTK de pywebview, para el modo --web-gui (opcional mientras la
-# GUI PySide6 siga siendo la que arranca por defecto). PyInstaller no
-# empaqueta bibliotecas de sistema de GTK/WebKit, así que hacen falta
-# instaladas en la máquina del usuario. Nombres verificados en Fedora.
+# Backend GTK de pywebview, que carga la interfaz (frontend React).
+# PyInstaller no empaqueta bibliotecas de sistema de GTK/WebKit, así que
+# hacen falta instaladas en la máquina del usuario. Nombres verificados
+# en Fedora.
 Requires:       webkit2gtk4.1%{?_isa}
 Requires:       python3-gobject%{?_isa}
 
 %description
 Controlador de cámaras PTZ compatibles con ONVIF: teclado (WASD) y mando
-SDL, movimiento proporcional, presets y una interfaz PySide6 con vista
-previa RTSP. Incluye un modo simulado (Mock) para probar sin hardware.
+SDL, movimiento proporcional, presets y una interfaz web (React) con
+vista previa RTSP. Incluye un modo simulado (Mock) para probar sin
+hardware.
 
 Este paquete instala el ejecutable autocontenido (PyInstaller) y lo
 arranca en modo cámara real por defecto.

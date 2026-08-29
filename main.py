@@ -16,8 +16,6 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-from PySide6.QtWidgets import QApplication, QDialog
-
 from camera.ptz_controller import OnvifPTZController, PTZController
 from camera.mock_ptz import MockPTZController
 from config.settings import Settings
@@ -28,14 +26,12 @@ from controllers.pygame_events import PyGameEventBroker
 from core.command_worker import CommandWorker
 from core.event_bus import EventBus
 from core.ref import Ref
-from gui.connection_dialog import ConnectionDialog
-from gui.main_window import MainWindow
 from gui_web.api import Api
 from gui_web.bridge import EventBridge
 from gui_web.poller import StatusPoller
 from gui_web.video_controller import VideoController
 from gui_web.video_server import VideoHttpServer
-from models.commands import ConnectCommand, PTZStatus, QuitCommand
+from models.commands import QuitCommand
 from utils.logger import get_logger, setup_logging
 from utils.paths import (
     bundled_file,
@@ -81,14 +77,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--no-joystick",
         action="store_true",
         help="No iniciar el controlador de joystick",
-    )
-    parser.add_argument(
-        "--web-gui",
-        action="store_true",
-        help=(
-            "Usar el frontend web (React/pywebview) en vez de la GUI "
-            "PySide6. Temporal, mientras dura la migración a pywebview."
-        ),
     )
     return parser.parse_args(argv)
 
@@ -149,7 +137,7 @@ def create_ptz_controller(settings: Settings, mock: bool) -> PTZController:
     return controller
 
 
-def _run_web_gui(
+def _run_gui(
     *,
     bus: EventBus,
     settings: Settings,
@@ -161,19 +149,14 @@ def _run_web_gui(
     ref: Ref,
     poll_status: Callable[[], None],
 ) -> int:
-    """Arranca el frontend web (React) dentro de una ventana pywebview.
-
-    Fase de migración: mientras ``gui_web``/``frontend`` no cubran todo lo
-    que hace ``gui/`` (PySide6), esto es un camino alternativo detrás de
-    ``--web-gui`` — ``MainWindow`` sigue siendo la GUI por defecto.
-    """
+    """Arranca el frontend (React) dentro de una ventana pywebview."""
     import webview
 
     index_html = frontend_index_html()
     if not index_html.is_file():
         log.error(
-            "No se encuentra %s: compile el frontend antes de usar "
-            "--web-gui ('cd frontend && npm install && npm run build')",
+            "No se encuentra %s: compile el frontend antes de arrancar "
+            "('cd frontend && npm install && npm run build')",
             index_html,
         )
         return 1
@@ -251,7 +234,7 @@ def _run_web_gui(
         bus.publish("ptz.presets", ref.value.list_presets())
         poller.start()
 
-    log.info("Aplicación iniciada (web-gui)")
+    log.info("Aplicación iniciada")
     webview.start(on_started, debug=not is_frozen())
     on_quit()
     log.info("Aplicación finalizada")
@@ -390,78 +373,17 @@ def main(argv: list[str] | None = None) -> int:
 
     # -- GUI --------------------------------------------------------------
 
-    if args.web_gui:
-        return _run_web_gui(
-            bus=bus,
-            settings=settings,
-            config_path=config_path,
-            keyboard=keyboard,
-            joystick=joystick,
-            broker=broker,
-            worker=worker,
-            ref=ref,
-            poll_status=lambda: worker.submit(publish_status, key="status"),
-        )
-
-    app = QApplication(sys.argv[:1])
-    app.setApplicationName("ptz-controller")
-
-    connection_dialog = ConnectionDialog(settings)
-    if connection_dialog.exec() != QDialog.DialogCode.Accepted:
-        log.info("Conexión cancelada por el usuario; cerrando aplicación")
-        keyboard.stop()
-        if joystick is not None:
-            joystick.stop()
-        broker.stop()
-        worker.stop()
-        return 0
-    connection_dialog.apply_to_settings()
-    mock = resolve_mock(args, settings)
-
-    poll_interval = settings.gui.poll_interval_ms if mock else 500
-    window = MainWindow(
-        controller_ref=ref,
+    return _run_gui(
         bus=bus,
         settings=settings,
-        keyboard_controller=keyboard,
-        config_path=str(config_path),
-        poll_interval_ms=poll_interval,
+        config_path=config_path,
+        keyboard=keyboard,
+        joystick=joystick,
+        broker=broker,
+        worker=worker,
+        ref=ref,
         poll_status=lambda: worker.submit(publish_status, key="status"),
     )
-    window.show()
-    log.info("Aplicación iniciada (modo: %s)", "mock" if mock else "real")
-    bus.send(ConnectCommand())
-
-    # -- Cierre ordenado --------------------------------------------------
-
-    quit_guard = {"done": False}
-
-    def on_quit() -> None:
-        if quit_guard["done"]:
-            return
-        quit_guard["done"] = True
-        log.info("Cerrando aplicación…")
-        keyboard.stop()
-        if joystick is not None:
-            joystick.stop()
-        broker.stop()
-        worker.stop()
-        try:
-            ref.value.stop()
-            ref.value.disconnect()
-        except Exception:  # noqa: BLE001 - cierre tolerante a errores
-            pass
-        try:
-            settings.save(config_path)
-        except OSError as exc:
-            log.error("No se pudo guardar la configuración: %s", exc)
-        app.quit()
-
-    bus.subscribe("command.quit", lambda _cmd: on_quit())
-
-    exit_code = app.exec()
-    log.info("Aplicación finalizada")
-    return exit_code
 
 
 if __name__ == "__main__":
