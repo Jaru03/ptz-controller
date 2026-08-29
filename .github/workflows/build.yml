@@ -92,7 +92,20 @@ jobs:
       # (packaging/icon.{png,ico}) y regenerarlos no forma parte del
       # pipeline automático — solo hace falta si alguien edita
       # packaging/icon.svg a mano (ver packaging/make_icons.py).
-      - name: Build executable
+      #
+      # xvfb-run en Linux: el hook de PyInstaller para pynput
+      # (collect_submodules) importa pynput de verdad para descubrir sus
+      # submódulos, y pynput intenta conectar a X11 nada más importar
+      # pynput.keyboard — sin DISPLAY esa importación falla, el hook la
+      # atrapa y se salta TODO pynput.keyboard._xorg, así que el binario
+      # queda sin ese backend y revienta al arrancar (visto en v0.4.0).
+      - name: Build executable (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a uv run --group build python packaging/build.py --clean --skip-icons
+        shell: bash
+
+      - name: Build executable (Windows)
+        if: runner.os == 'Windows'
         run: uv run --group build python packaging/build.py --clean --skip-icons
         shell: bash
 
