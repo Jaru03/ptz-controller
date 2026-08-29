@@ -199,3 +199,54 @@ def test_discover_returns_empty_list_on_error(monkeypatch, tmp_path) -> None:
     api, _settings, _sent = _api_with_bus(tmp_path)
 
     assert api.discover() == []
+
+
+def test_get_controls_info_returns_keyboard_and_joystick(tmp_path) -> None:
+    api, settings, _sent = _api_with_bus(tmp_path)
+
+    info = api.get_controls_info()
+
+    assert info["keyboard"]["up"] == settings.keyboard.up
+    assert info["keyboard"]["preset_keys"] == settings.keyboard.preset_keys
+    assert info["joystick"]["pan_axis"] == settings.joystick.pan_axis
+    assert info["joystick"]["preset_buttons"] == settings.joystick.preset_buttons
+
+
+def test_get_version_returns_the_app_version(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(api_module, "get_version", lambda: "9.9.9")
+    api, _settings, _sent = _api_with_bus(tmp_path)
+
+    assert api.get_version() == "9.9.9"
+
+
+def test_check_for_updates_returns_json_safe_result(monkeypatch, tmp_path) -> None:
+    from models.version import UpdateResult
+
+    monkeypatch.setattr(
+        api_module,
+        "check_for_updates",
+        lambda: UpdateResult(ok=True, current="0.3.2", latest="v0.4.0", up_to_date=False),
+    )
+    api, _settings, _sent = _api_with_bus(tmp_path)
+
+    result = api.check_for_updates()
+
+    assert result == {
+        "ok": True,
+        "error": "",
+        "current": "0.3.2",
+        "latest": "v0.4.0",
+        "up_to_date": False,
+        "release_url": "https://github.com/Jaru03/ptz-controller/releases",
+    }
+
+
+def test_open_releases_page_opens_the_browser(monkeypatch, tmp_path) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr(api_module.webbrowser, "open", lambda url: opened.append(url))
+    api, _settings, _sent = _api_with_bus(tmp_path)
+
+    result = api.open_releases_page()
+
+    assert result == {"ok": True}
+    assert opened == [api_module.RELEASES_PAGE]

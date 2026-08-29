@@ -2,9 +2,11 @@ import { useState } from 'react'
 import { CameraStatusPanel } from '@/components/camera/CameraStatusPanel'
 import { ConnectionCard } from '@/components/connection/ConnectionCard'
 import { SpeedControl } from '@/components/connection/SpeedControl'
+import { ControlsPanel } from '@/components/controls/ControlsPanel'
 import { PresetsPanel } from '@/components/presets/PresetsPanel'
 import { SettingsDialog } from '@/components/settings/SettingsDialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { UpdatesPanel } from '@/components/updates/UpdatesPanel'
 import { VideoPanel } from '@/components/video/VideoPanel'
 import { useBusEvent } from '@/hooks/useBusEvent'
 import type { PtzStatus } from '@/lib/types'
@@ -13,8 +15,7 @@ import type { PtzStatus } from '@/lib/types'
  * Vista principal (equivalente a gui/main_window.py::MainWindow):
  * pestañas a la izquierda (Vista previa/Simulación/Controles/
  * Actualizaciones) + panel de control a la derecha (conexión, estado,
- * velocidad, presets, ajustes). "Controles"/"Actualizaciones" quedan de
- * marcador de posición hasta la Fase 5.
+ * velocidad, presets, ajustes).
  */
 export function MainScreen() {
   const [status, setStatus] = useState<PtzStatus | null>(null)
@@ -37,10 +38,10 @@ export function MainScreen() {
             <CameraStatusPanel />
           </TabsContent>
           <TabsContent value="controls" className="h-[calc(100%-2.5rem)]">
-            <PlaceholderPanel text="Referencia de controles — Fase 5" />
+            <ControlsPanel />
           </TabsContent>
           <TabsContent value="updates" className="h-[calc(100%-2.5rem)]">
-            <PlaceholderPanel text="Actualizaciones — Fase 5" />
+            <UpdatesPanel />
           </TabsContent>
         </Tabs>
       </div>
@@ -51,14 +52,6 @@ export function MainScreen() {
         <PresetsPanel />
         <SettingsDialog />
       </aside>
-    </div>
-  )
-}
-
-function PlaceholderPanel({ text }: { text: string }) {
-  return (
-    <div className="flex h-full items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
-      {text}
     </div>
   )
 }

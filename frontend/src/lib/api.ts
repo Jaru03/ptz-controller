@@ -3,7 +3,14 @@
  * pywebview inyecta `window.pywebview` de forma asíncrona tras cargar la
  * página; `ready()` espera el evento `pywebviewready` si aún no está.
  */
-import type { AppSettings, CameraSettings, DiscoveredDevice, MovementSettings } from './types'
+import type {
+  AppSettings,
+  CameraSettings,
+  ControlsInfo,
+  DiscoveredDevice,
+  MovementSettings,
+  UpdateResult,
+} from './types'
 
 function ready(): Promise<void> {
   if (window.pywebview) return Promise.resolve()
@@ -33,5 +40,9 @@ export const api = {
     camera?: Partial<CameraSettings>
     movement?: Partial<MovementSettings>
   }): Promise<AppSettings> => call((a) => a.save_settings(patch)),
+  getControlsInfo: (): Promise<ControlsInfo> => call((a) => a.get_controls_info()),
+  getVersion: (): Promise<string> => call((a) => a.get_version()),
+  checkForUpdates: (): Promise<UpdateResult> => call((a) => a.check_for_updates()),
+  openReleasesPage: () => call((a) => a.open_releases_page()),
   quit: () => call((a) => a.quit()),
 }

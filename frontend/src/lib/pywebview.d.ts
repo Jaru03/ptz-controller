@@ -1,4 +1,4 @@
-import type { AppSettings, CameraSettings, DiscoveredDevice } from './types'
+import type { AppSettings, CameraSettings, ControlsInfo, DiscoveredDevice, UpdateResult } from './types'
 
 /**
  * pywebview inyecta `window.pywebview.api` de forma asíncrona (tras
@@ -28,6 +28,10 @@ declare global {
           camera?: Partial<CameraSettings>
           movement?: Partial<import('./types').MovementSettings>
         }): Promise<AppSettings>
+        get_controls_info(): Promise<ControlsInfo>
+        get_version(): Promise<string>
+        check_for_updates(): Promise<UpdateResult>
+        open_releases_page(): Promise<{ ok: boolean }>
         quit(): Promise<{ ok: boolean }>
       }
     }

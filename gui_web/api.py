@@ -12,6 +12,7 @@ un puente de hilo propio (a diferencia de ``_DiscoveryBridge`` en
 
 from __future__ import annotations
 
+import webbrowser
 from pathlib import Path
 
 from camera.discovery import discover_devices
@@ -28,6 +29,7 @@ from models.commands import (
     SetPresetCommand,
     SetSpeedCommand,
 )
+from models.version import RELEASES_PAGE, check_for_updates, get_version
 from utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -142,6 +144,41 @@ class Api:
 
         self._settings.save(self._config_path)
         return self._settings.to_dict()
+
+    # -- Controles (referencia de solo lectura) ------------------------------
+
+    def get_controls_info(self) -> dict:
+        """Vinculaciones de teclado/mando, para el panel de Controles.
+
+        Devuelve la configuración cruda (``KeyboardConfig``/
+        ``JoystickConfig``); el formateo a etiquetas legibles ('↑', 'Num
+        1'...) vive en el frontend (``lib/keymap.ts::keyLabel``), igual
+        que ``gui/controls_widget.py::_key_label`` vive en la GUI y no en
+        ``config/settings.py``.
+        """
+        return {
+            "keyboard": to_json_safe(self._settings.keyboard),
+            "joystick": to_json_safe(self._settings.joystick),
+        }
+
+    # -- Actualizaciones ----------------------------------------------------
+
+    def get_version(self) -> str:
+        return get_version()
+
+    def check_for_updates(self) -> dict:
+        return to_json_safe(check_for_updates())
+
+    def open_releases_page(self) -> dict:
+        """Abre la página de releases en el navegador del sistema.
+
+        Equivalente a ``QDesktopServices.openUrl`` en
+        gui/updates_widget.py: pywebview no navega la propia ventana
+        (eso la sacaría de la app), así que se delega al navegador
+        externo del sistema operativo vía ``webbrowser``.
+        """
+        webbrowser.open(RELEASES_PAGE)
+        return {"ok": True}
 
     # -- Ciclo de vida ------------------------------------------------------
 
