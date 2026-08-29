@@ -10,7 +10,7 @@ import { UpdatesPanel } from '@/components/updates/UpdatesPanel'
 import { VideoPanel } from '@/components/video/VideoPanel'
 import { useBusEvent } from '@/hooks/useBusEvent'
 import { useWindowKeyboard } from '@/hooks/useWindowKeyboard'
-import type { PtzStatus } from '@/lib/types'
+import type { JoystickInputState, KeyboardInputState, PtzStatus } from '@/lib/types'
 
 /**
  * Vista principal (equivalente a gui/main_window.py::MainWindow):
@@ -20,7 +20,11 @@ import type { PtzStatus } from '@/lib/types'
  */
 export function MainScreen() {
   const [status, setStatus] = useState<PtzStatus | null>(null)
+  const [keyboard, setKeyboard] = useState<KeyboardInputState | null>(null)
+  const [joystick, setJoystick] = useState<JoystickInputState | null>(null)
   useBusEvent<PtzStatus>('ptz.status', setStatus)
+  useBusEvent<KeyboardInputState>('input.keyboard', setKeyboard)
+  useBusEvent<JoystickInputState>('input.joystick', setJoystick)
   useWindowKeyboard()
 
   return (
@@ -48,7 +52,7 @@ export function MainScreen() {
         </Tabs>
       </div>
       <aside className="w-72 shrink-0 space-y-4 overflow-y-auto border-l bg-card p-4">
-        <StatusSummary status={status} />
+        <StatusSummary status={status} keyboard={keyboard} joystick={joystick} />
         <SpeedControl />
         <PresetsPanel />
         <div className="space-y-2 border-t pt-4">
@@ -60,15 +64,30 @@ export function MainScreen() {
   )
 }
 
-function StatusSummary({ status }: { status: PtzStatus | null }) {
+function StatusSummary({
+  status,
+  keyboard,
+  joystick,
+}: {
+  status: PtzStatus | null
+  keyboard: KeyboardInputState | null
+  joystick: JoystickInputState | null
+}) {
+  // Solo se muestra mientras hay movimiento de verdad (tecla de
+  // movimiento pulsada / stick fuera de la zona muerta), no como
+  // indicador permanente de "hay un backend de teclado" o "hay un mando
+  // conectado".
+  const keyboardMoving = keyboard?.active ?? false
+  const joystickMoving = joystick?.moving ?? false
+
   return (
     <div className="space-y-2 text-sm">
       <h2 className="font-medium">Estado</h2>
       <dl className="space-y-1 text-muted-foreground">
         <Row label="Conectada" value={status?.connected ? 'Sí' : 'No'} />
         <Row label="Cámara" value={status?.device_name || '—'} />
-        <Row label="IP" value={status?.ip || '—'} />
-        <Row label="Entrada" value={status?.input_active || '—'} />
+        {keyboardMoving && <Row label="Teclado" value={`Activo (${keyboard!.backend})`} />}
+        {joystickMoving && <Row label="Mando" value={joystick!.name} />}
       </dl>
     </div>
   )
@@ -77,8 +96,8 @@ function StatusSummary({ status }: { status: PtzStatus | null }) {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between gap-2">
-      <dt>{label}</dt>
-      <dd className="text-foreground">{value}</dd>
+      <dt className="shrink-0">{label}</dt>
+      <dd className="text-right text-foreground">{value}</dd>
     </div>
   )
 }

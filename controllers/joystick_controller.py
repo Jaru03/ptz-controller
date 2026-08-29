@@ -49,6 +49,7 @@ class JoystickController(InputController):
         self._axes: dict[int, dict[int, float]] = {}
         self._hats: dict[int, dict[int, tuple[int, int]]] = {}
         self._started = False
+        self._moving = False
 
     @property
     def name(self) -> str:
@@ -87,6 +88,7 @@ class JoystickController(InputController):
         self._started = False
         self._axes.clear()
         self._hats.clear()
+        self._moving = False
         self._publish_device_status()
 
     # -- Handlers de eventos ---------------------------------------------
@@ -139,6 +141,8 @@ class JoystickController(InputController):
             return
         self._axes.pop(instance_id, None)
         self._hats.pop(instance_id, None)
+        if not self._axes:
+            self._moving = False
         self._publish_device_status()
 
     # -- Lógica -----------------------------------------------------------
@@ -175,6 +179,21 @@ class JoystickController(InputController):
 
         self._movement.update(pan, tilt, zoom)
 
+        # "En movimiento" para la interfaz (distinto de "conectado"): un
+        # stick en reposo sigue reportando eventos de eje con valores casi
+        # cero, así que se compara contra la zona muerta configurada, no
+        # contra 0.0 exacto. Solo se publica cuando cambia para no saturar
+        # el bus con cada micro-evento de eje (pueden llegar muchos por
+        # segundo mientras el stick está inclinado).
+        moving = (
+            abs(pan) > config.deadzone
+            or abs(tilt) > config.deadzone
+            or abs(zoom) > config.deadzone
+        )
+        if moving != self._moving:
+            self._moving = moving
+            self._publish_device_status()
+
     def _change_speed(self, delta: float) -> None:
         new_speed = max(0.05, min(1.0, self._movement.speed + delta))
         self._movement.set_speed(new_speed)
@@ -202,6 +221,9 @@ class JoystickController(InputController):
             if joystick is not None:
                 names.append(joystick.get_name())
         if names:
-            self._bus.publish(JOYSTICK_TOPIC, {"connected": True, "name": ", ".join(names)})
+            self._bus.publish(
+                JOYSTICK_TOPIC,
+                {"connected": True, "name": ", ".join(names), "moving": self._moving},
+            )
         else:
-            self._bus.publish(JOYSTICK_TOPIC, {"connected": False, "name": ""})
+            self._bus.publish(JOYSTICK_TOPIC, {"connected": False, "name": "", "moving": False})

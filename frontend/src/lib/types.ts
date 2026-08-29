@@ -59,6 +59,19 @@ export interface StreamState {
   message: string
 }
 
+/** Payload de input.keyboard (controllers/keyboard_controller.py::_notify_active). */
+export interface KeyboardInputState {
+  active: boolean
+  backend: string
+}
+
+/** Payload de input.joystick (controllers/joystick_controller.py). */
+export interface JoystickInputState {
+  connected: boolean
+  name: string
+  moving: boolean
+}
+
 export interface KeyboardConfig {
   backend: 'auto' | 'pynput' | 'qt' | 'window'
   up: string

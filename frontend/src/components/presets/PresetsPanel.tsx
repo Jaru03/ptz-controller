@@ -70,7 +70,10 @@ export function PresetsPanel() {
 
   return (
     <div className="space-y-2">
-      <h2 className="text-sm font-medium">Presets</h2>
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-sm font-medium">Presets</h2>
+        <span className="text-xs text-muted-foreground">Doble clic para ir</span>
+      </div>
       <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-1">
         {presets.length === 0 && (
           <p className="p-2 text-sm text-muted-foreground">Sin presets guardados</p>
@@ -90,10 +93,7 @@ export function PresetsPanel() {
           </button>
         ))}
       </div>
-      <div className="grid grid-cols-4 gap-1">
-        <Button size="sm" variant="outline" disabled={!selected} onClick={() => selected && goto(selected)}>
-          Ir
-        </Button>
+      <div className="grid grid-cols-3 gap-1">
         <Button size="sm" variant="outline" onClick={openSave}>
           Guardar
         </Button>
