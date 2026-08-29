@@ -13,11 +13,21 @@ declare global {
     pywebview?: {
       api: {
         connect(): Promise<{ ok: boolean }>
+        disconnect(): Promise<{ ok: boolean }>
         apply_connection_settings(
           patch: Partial<CameraSettings>,
         ): Promise<{ ok: boolean }>
         discover(): Promise<DiscoveredDevice[]>
+        goto_preset(token: string): Promise<{ ok: boolean }>
+        set_preset(token: string, name: string): Promise<{ ok: boolean }>
+        rename_preset(token: string, name: string): Promise<{ ok: boolean }>
+        remove_preset(token: string): Promise<{ ok: boolean }>
+        set_speed(speed: number): Promise<{ ok: boolean }>
         get_settings(): Promise<AppSettings>
+        save_settings(patch: {
+          camera?: Partial<CameraSettings>
+          movement?: Partial<import('./types').MovementSettings>
+        }): Promise<AppSettings>
         quit(): Promise<{ ok: boolean }>
       }
     }

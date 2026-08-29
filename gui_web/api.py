@@ -12,11 +12,22 @@ un puente de hilo propio (a diferencia de ``_DiscoveryBridge`` en
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from camera.discovery import discover_devices
 from config.settings import Settings
 from core.event_bus import EventBus
 from gui_web.serialize import to_json_safe
-from models.commands import ConnectCommand, QuitCommand
+from models.commands import (
+    ConnectCommand,
+    DisconnectCommand,
+    GotoPresetCommand,
+    QuitCommand,
+    RemovePresetCommand,
+    RenamePresetCommand,
+    SetPresetCommand,
+    SetSpeedCommand,
+)
 from utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -25,15 +36,20 @@ log = get_logger(__name__)
 class Api:
     """Métodos invocables desde JS vía ``window.pywebview.api``."""
 
-    def __init__(self, bus: EventBus, settings: Settings) -> None:
+    def __init__(self, bus: EventBus, settings: Settings, config_path: Path) -> None:
         self._bus = bus
         self._settings = settings
+        self._config_path = config_path
 
     # -- Conexión -----------------------------------------------------
 
     def connect(self) -> dict:
         """Aplica los datos de conexión recibidos y pide conectar."""
         self._bus.send(ConnectCommand())
+        return {"ok": True}
+
+    def disconnect(self) -> dict:
+        self._bus.send(DisconnectCommand())
         return {"ok": True}
 
     def apply_connection_settings(self, patch: dict) -> dict:
@@ -60,9 +76,74 @@ class Api:
             return []
         return [to_json_safe(device) for device in devices]
 
+    # -- Presets --------------------------------------------------------
+
+    def goto_preset(self, token: str) -> dict:
+        self._bus.send(GotoPresetCommand(token))
+        return {"ok": True}
+
+    def set_preset(self, token: str, name: str) -> dict:
+        self._bus.send(SetPresetCommand(token, name))
+        return {"ok": True}
+
+    def rename_preset(self, token: str, name: str) -> dict:
+        self._bus.send(RenamePresetCommand(token, name))
+        return {"ok": True}
+
+    def remove_preset(self, token: str) -> dict:
+        self._bus.send(RemovePresetCommand(token))
+        return {"ok": True}
+
+    # -- Velocidad --------------------------------------------------------
+
+    def set_speed(self, speed: float) -> dict:
+        self._bus.send(SetSpeedCommand(float(speed)))
+        return {"ok": True}
+
+    # -- Ajustes ----------------------------------------------------------
+
     def get_settings(self) -> dict:
         """Devuelve el ``Settings`` completo, ya en forma JSON."""
         return self._settings.to_dict()
+
+    def save_settings(self, patch: dict) -> dict:
+        """Aplica un parche de ajustes (cámara + movimiento) y lo persiste.
+
+        Muta los campos del ``Settings`` vivo en vez de sustituirlo por
+        una instancia nueva: otras partes de la app (los closures de
+        ``main.py``, ``MovementState``...) guardan una referencia directa
+        a este mismo objeto, así que reemplazarlo las dejaría leyendo
+        datos obsoletos sin que nadie se entere.
+        """
+        camera_patch = patch.get("camera") or {}
+        movement_patch = patch.get("movement") or {}
+
+        camera = self._settings.camera
+        if "ip" in camera_patch:
+            camera.ip = str(camera_patch["ip"]).strip()
+        if "port" in camera_patch:
+            camera.port = int(camera_patch["port"])
+        if "username" in camera_patch:
+            camera.username = str(camera_patch["username"])
+        if "password" in camera_patch:
+            camera.password = str(camera_patch["password"])
+        if "rtsp_url" in camera_patch:
+            camera.rtsp_url = str(camera_patch["rtsp_url"]).strip()
+        if "mock" in camera_patch:
+            camera.mock = bool(camera_patch["mock"])
+
+        movement = self._settings.movement
+        if "speed" in movement_patch:
+            movement.speed = float(movement_patch["speed"])
+        if "deadzone" in movement_patch:
+            movement.deadzone = float(movement_patch["deadzone"])
+        if "zoom_mode" in movement_patch:
+            movement.zoom_mode = str(movement_patch["zoom_mode"])
+
+        self._settings.save(self._config_path)
+        return self._settings.to_dict()
+
+    # -- Ciclo de vida ------------------------------------------------------
 
     def quit(self) -> dict:
         self._bus.send(QuitCommand())

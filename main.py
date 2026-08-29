@@ -178,7 +178,7 @@ def _run_web_gui(
         )
         return 1
 
-    api = Api(bus, settings)
+    api = Api(bus, settings, config_path)
     window_ref: dict[str, Any] = {"window": None}
     EventBridge(bus, lambda: window_ref["window"])
     # settings.camera.mock puede cambiar en caliente (ConnectionScreen),

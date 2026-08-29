@@ -1,17 +1,20 @@
 import { useState } from 'react'
 import { CameraStatusPanel } from '@/components/camera/CameraStatusPanel'
-import { VideoPanel } from '@/components/video/VideoPanel'
+import { ConnectionCard } from '@/components/connection/ConnectionCard'
+import { SpeedControl } from '@/components/connection/SpeedControl'
+import { PresetsPanel } from '@/components/presets/PresetsPanel'
+import { SettingsDialog } from '@/components/settings/SettingsDialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { VideoPanel } from '@/components/video/VideoPanel'
 import { useBusEvent } from '@/hooks/useBusEvent'
 import type { PtzStatus } from '@/lib/types'
 
 /**
  * Vista principal (equivalente a gui/main_window.py::MainWindow):
  * pestañas a la izquierda (Vista previa/Simulación/Controles/
- * Actualizaciones) + panel de estado a la derecha. En esta fase solo
- * "Simulación" (CameraStatusPanel) y el estado básico están conectados
- * de verdad; el resto de pestañas y el panel de conexión/presets llegan
- * en las fases siguientes.
+ * Actualizaciones) + panel de control a la derecha (conexión, estado,
+ * velocidad, presets, ajustes). "Controles"/"Actualizaciones" quedan de
+ * marcador de posición hasta la Fase 5.
  */
 export function MainScreen() {
   const [status, setStatus] = useState<PtzStatus | null>(null)
@@ -41,8 +44,12 @@ export function MainScreen() {
           </TabsContent>
         </Tabs>
       </div>
-      <aside className="w-72 shrink-0 border-l bg-card p-4">
+      <aside className="w-72 shrink-0 space-y-4 overflow-y-auto border-l bg-card p-4">
+        <ConnectionCard />
         <StatusSummary status={status} />
+        <SpeedControl />
+        <PresetsPanel />
+        <SettingsDialog />
       </aside>
     </div>
   )
@@ -58,14 +65,13 @@ function PlaceholderPanel({ text }: { text: string }) {
 
 function StatusSummary({ status }: { status: PtzStatus | null }) {
   return (
-    <div className="space-y-3 text-sm">
+    <div className="space-y-2 text-sm">
       <h2 className="font-medium">Estado</h2>
       <dl className="space-y-1 text-muted-foreground">
         <Row label="Conectada" value={status?.connected ? 'Sí' : 'No'} />
         <Row label="Cámara" value={status?.device_name || '—'} />
         <Row label="IP" value={status?.ip || '—'} />
         <Row label="Entrada" value={status?.input_active || '—'} />
-        <Row label="Velocidad" value={status ? `${Math.round(status.speed * 100)}%` : '—'} />
       </dl>
     </div>
   )
