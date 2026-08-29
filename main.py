@@ -31,6 +31,8 @@ from core.ref import Ref
 from gui.connection_dialog import ConnectionDialog
 from gui.main_window import MainWindow
 from gui_web.api import Api
+from gui_web.bridge import EventBridge
+from gui_web.poller import StatusPoller
 from models.commands import ConnectCommand, PTZStatus, QuitCommand
 from utils.logger import get_logger, setup_logging
 from utils.paths import (
@@ -155,13 +157,13 @@ def _run_web_gui(
     broker: PyGameEventBroker,
     worker: CommandWorker,
     ref: Ref,
+    poll_status: Callable[[], None],
 ) -> int:
     """Arranca el frontend web (React) dentro de una ventana pywebview.
 
-    Fase de migración: por ahora ``gui_web``/``frontend`` solo tienen la
-    pantalla de conexión (Fase 1 del plan), así que esto es un camino
-    alternativo detrás de ``--web-gui`` mientras la GUI PySide6
-    (``MainWindow``) sigue siendo la que arranca por defecto.
+    Fase de migración: mientras ``gui_web``/``frontend`` no cubran todo lo
+    que hace ``gui/`` (PySide6), esto es un camino alternativo detrás de
+    ``--web-gui`` — ``MainWindow`` sigue siendo la GUI por defecto.
     """
     import webview
 
@@ -175,6 +177,16 @@ def _run_web_gui(
         return 1
 
     api = Api(bus, settings)
+    window_ref: dict[str, Any] = {"window": None}
+    EventBridge(bus, lambda: window_ref["window"])
+    # settings.camera.mock puede cambiar en caliente (ConnectionScreen),
+    # así que el intervalo se recalcula en cada ciclo (ver StatusPoller).
+    poller = StatusPoller(
+        poll_status,
+        interval_ms=lambda: (
+            settings.gui.poll_interval_ms if settings.camera.mock else 500
+        ),
+    )
 
     quit_guard = {"done": False}
 
@@ -183,6 +195,7 @@ def _run_web_gui(
             return
         quit_guard["done"] = True
         log.info("Cerrando aplicación…")
+        poller.stop()
         keyboard.stop()
         if joystick is not None:
             joystick.stop()
@@ -207,9 +220,16 @@ def _run_web_gui(
         width=1100,
         height=720,
     )
+    window_ref["window"] = window
     window.events.closed += lambda: bus.send(QuitCommand())
 
+    # Estado inicial, igual que MainWindow.__init__: así el frontend no
+    # arranca vacío a la espera del primer tick del poller.
+    bus.publish("ptz.status", ref.value.get_status())
+    bus.publish("ptz.presets", ref.value.list_presets())
+
     log.info("Aplicación iniciada (web-gui)")
+    poller.start()
     webview.start(debug=not is_frozen())
     on_quit()
     log.info("Aplicación finalizada")
@@ -358,6 +378,7 @@ def main(argv: list[str] | None = None) -> int:
             broker=broker,
             worker=worker,
             ref=ref,
+            poll_status=lambda: worker.submit(publish_status, key="status"),
         )
 
     app = QApplication(sys.argv[:1])
