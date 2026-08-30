@@ -215,7 +215,12 @@ def _run_gui(
 
     window = webview.create_window(
         "Controlador de cámaras PTZ ONVIF",
-        url=f"{index_html.as_uri()}?videoPort={video_server.port}",
+        # Fragmento (#), no query (?): en una URL file:// el fragmento
+        # nunca participa en la resolución del archivo (es puramente del
+        # lado del navegador), mientras que el soporte de "?query" sobre
+        # file:// es más irregular entre motores — visto en Windows/
+        # WebView2 como ERR_FILE_NOT_FOUND al abrir la app ya instalada.
+        url=f"{index_html.as_uri()}#videoPort={video_server.port}",
         js_api=api,
         width=1100,
         height=720,
