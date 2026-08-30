@@ -8,7 +8,11 @@ const NO_SIGNAL: StreamState = {
 }
 
 function videoPort(): string | null {
-  return new URLSearchParams(window.location.search).get('videoPort')
+  // Fragmento (#), no query (?): ver el comentario junto a create_window()
+  // en main.py.
+  return new URLSearchParams(window.location.hash.replace(/^#/, '')).get(
+    'videoPort',
+  )
 }
 
 /**
