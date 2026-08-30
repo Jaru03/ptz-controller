@@ -1,6 +1,6 @@
 [project]
 name = "ptz-controller"
-version = "0.4.2"
+version = "0.4.3"
 description = "Controlador universal de cámaras PTZ ONVIF (teclado, gamepad, interfaz web con React)"
 readme = "README.md"
 authors = [
