@@ -201,6 +201,64 @@ def test_discover_returns_empty_list_on_error(monkeypatch, tmp_path) -> None:
     assert api.discover() == []
 
 
+def test_save_keyboard_settings_mutates_the_live_settings_object(tmp_path) -> None:
+    config_path = tmp_path / "config.yaml"
+    bus = EventBus()
+    settings = Settings.defaults()
+    api = Api(bus, settings, config_path)
+
+    result = api.save_keyboard_settings({"up": "I", "zoom_in": "O", "backend": "window"})
+
+    assert result["ok"] is True
+    assert settings.keyboard.up == "i"  # normalizada a minúscula
+    assert settings.keyboard.zoom_in == "o"
+    assert settings.keyboard.backend == "window"
+    assert result["settings"] == settings.to_dict()
+
+
+def test_save_keyboard_settings_persists_to_config_path(tmp_path) -> None:
+    config_path = tmp_path / "config.yaml"
+    bus = EventBus()
+    settings = Settings.defaults()
+    api = Api(bus, settings, config_path)
+
+    api.save_keyboard_settings({"up": "i"})
+
+    assert config_path.is_file()
+    reloaded = Settings.load(config_path)
+    assert reloaded.keyboard.up == "i"
+
+
+def test_save_keyboard_settings_rejects_duplicate_key(tmp_path) -> None:
+    api, settings, _sent = _api_with_bus(tmp_path)
+    original_down = settings.keyboard.down
+
+    result = api.save_keyboard_settings({"up": settings.keyboard.down})
+
+    assert result["ok"] is False
+    assert "down" not in result.get("error", "")  # el mensaje nombra la tecla, no el campo
+    assert settings.keyboard.up != settings.keyboard.down
+    assert settings.keyboard.down == original_down
+
+
+def test_save_keyboard_settings_rejects_key_colliding_with_preset(tmp_path) -> None:
+    api, settings, _sent = _api_with_bus(tmp_path)
+
+    result = api.save_keyboard_settings({"stop": settings.keyboard.preset_keys[0]})
+
+    assert result["ok"] is False
+    assert settings.keyboard.stop == "space"
+
+
+def test_save_keyboard_settings_rejects_blank_action_key(tmp_path) -> None:
+    api, settings, _sent = _api_with_bus(tmp_path)
+
+    result = api.save_keyboard_settings({"quit": "  "})
+
+    assert result["ok"] is False
+    assert settings.keyboard.quit == "esc"
+
+
 def test_get_controls_info_returns_keyboard_and_joystick(tmp_path) -> None:
     api, settings, _sent = _api_with_bus(tmp_path)
 

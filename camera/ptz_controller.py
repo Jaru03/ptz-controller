@@ -162,22 +162,30 @@ class OnvifPTZController(PTZController):
     def _move_with_zoom_steps(
         self, pan: float, tilt: float, zoom: float, speed: float
     ) -> None:
-        """Mueve el pan/tilt en continuo y el zoom a saltos discretos.
+        """Mueve el zoom a saltos discretos, o fusionado con el pan/tilt.
 
-        Cada llamada avanza el zoom ``zoom_step`` (escalado por la
-        velocidad), lo que permite pararlo en posiciones intermedias
-        aunque el firmware ignore el ``Stop`` del eje de zoom. En modo
-        'auto', si la cámara rechaza el ``RelativeMove`` se pasa
+        Con pan/tilt a la vez que zoom, el zoom se envía DENTRO del mismo
+        ``ContinuousMove`` (una sola petición SOAP) en lugar de partirlo en
+        dos llamadas (``ContinuousMove`` + ``RelativeMove``): muchas
+        cámaras solo admiten una operación de movimiento activa a la vez a
+        nivel de firmware, y al intercalar ambas la segunda corta a la
+        primera a mitad de movimiento (el pan/tilt se detiene en cuanto
+        llega el RelativeMove del zoom, o viceversa). Se sacrifica el paso
+        a saltos en ese caso, pero el movimiento combinado deja de
+        interrumpirse.
+
+        El paso a saltos (``RelativeMove``, que permite pararlo en
+        posiciones intermedias aunque el firmware ignore el ``Stop`` del
+        eje de zoom) solo se usa cuando el zoom se mueve solo, sin
+        pan/tilt, donde no hay ninguna otra operación con la que competir.
+        En modo 'auto', si la cámara rechaza el ``RelativeMove`` se pasa
         definitivamente a zoom continuo.
-
-        Si no hay pan/tilt no se envía ningún ``ContinuousMove``: hacerlo
-        con todos los ejes a cero se traduce en un ``Stop`` que llegaría
-        entre pasos de zoom y abortaría el desplazamiento anterior.
         """
         if pan or tilt:
-            self._client.continuous_move(pan, tilt, 0.0, speed)
-        else:
-            self._client.stop_inactive_axes(pan_tilt=False, zoom=False)
+            self._client.continuous_move(pan, tilt, zoom, speed)
+            return
+
+        self._client.stop_inactive_axes(pan_tilt=False, zoom=False)
         step = self._zoom_step * max(0.1, speed)
         try:
             self._client.relative_move(0.0, 0.0, zoom * step)

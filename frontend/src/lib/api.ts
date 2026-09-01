@@ -8,6 +8,8 @@ import type {
   CameraSettings,
   ControlsInfo,
   DiscoveredDevice,
+  KeyboardConfig,
+  KeyboardSettingsResult,
   MovementSettings,
   UpdateResult,
 } from './types'
@@ -44,6 +46,8 @@ export const api = {
   keyDown: (name: string) => call((a) => a.key_down(name)),
   keyUp: (name: string) => call((a) => a.key_up(name)),
   getControlsInfo: (): Promise<ControlsInfo> => call((a) => a.get_controls_info()),
+  saveKeyboardSettings: (patch: Partial<KeyboardConfig>): Promise<KeyboardSettingsResult> =>
+    call((a) => a.save_keyboard_settings(patch)),
   getVersion: (): Promise<string> => call((a) => a.get_version()),
   checkForUpdates: (): Promise<UpdateResult> => call((a) => a.check_for_updates()),
   openReleasesPage: () => call((a) => a.open_releases_page()),

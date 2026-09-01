@@ -67,10 +67,13 @@ def test_zoom_step_scales_with_speed() -> None:
     assert controller._client.calls[-1] == ("relative", 0.0, 0.0, -0.03)
 
 
-def test_zoom_step_keeps_pan_tilt_continuous() -> None:
+def test_zoom_and_pan_tilt_merge_into_one_continuous_move() -> None:
+    # Pan/tilt + zoom a la vez no se parte en dos llamadas (ContinuousMove
+    # + RelativeMove): algunas cámaras solo soportan una operación de
+    # movimiento activa y la segunda corta a la primera a mitad de camino.
     controller = _controller("step")
     controller.move(pan=1.0, tilt=0.0, zoom=1.0, speed=1.0)
-    assert controller._client.calls[0] == ("continuous", 1.0, 0.0, 0.0, 1.0)
+    assert controller._client.calls == [("continuous", 1.0, 0.0, 1.0, 1.0)]
 
 
 def test_zoom_continuous_mode_never_uses_relative_move() -> None:

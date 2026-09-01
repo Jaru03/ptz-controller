@@ -35,6 +35,29 @@ from utils.logger import get_logger
 
 log = get_logger(__name__)
 
+_KEYBOARD_ACTION_FIELDS = (
+    "up",
+    "down",
+    "left",
+    "right",
+    "zoom_in",
+    "zoom_out",
+    "stop",
+    "quit",
+)
+
+
+def _duplicate_keyboard_key(
+    action_keys: dict[str, str], preset_keys: list[str], preset_hotkeys: dict[str, str]
+) -> str | None:
+    """Primera tecla usada en más de una acción, o ``None`` si no hay conflicto."""
+    counts: dict[str, int] = {}
+    for key in [*action_keys.values(), *preset_keys, *preset_hotkeys.keys()]:
+        if not key:
+            continue
+        counts[key] = counts.get(key, 0) + 1
+    return next((key for key, count in counts.items() if count > 1), None)
+
 
 class Api:
     """Métodos invocables desde JS vía ``window.pywebview.api``."""
@@ -152,6 +175,57 @@ class Api:
 
         self._settings.save(self._config_path)
         return self._settings.to_dict()
+
+    def save_keyboard_settings(self, patch: dict) -> dict:
+        """Aplica un parche de mapeo de teclado y lo persiste.
+
+        Igual que ``save_settings``, muta ``self._settings.keyboard`` en
+        vez de sustituirlo: es la misma instancia que sostiene el
+        ``KeyboardController`` en marcha (ver ``main.py``), así que las
+        reasignaciones de tecla se aplican en caliente, sin reiniciar
+        nada.
+
+        Antes de aplicar valida que ninguna tecla quede asignada a dos
+        acciones a la vez (movimiento, detener, salir o una escena): si
+        hay conflicto no se guarda nada y se devuelve el error para que
+        la interfaz lo muestre sin perder la edición en curso.
+        """
+        keyboard = self._settings.keyboard
+
+        action_keys = {field: getattr(keyboard, field) for field in _KEYBOARD_ACTION_FIELDS}
+        for field in _KEYBOARD_ACTION_FIELDS:
+            if field in patch:
+                action_keys[field] = str(patch[field]).strip().lower()
+        if any(not key for key in action_keys.values()):
+            return {"ok": False, "error": "Ninguna acción puede quedarse sin tecla asignada"}
+
+        preset_keys = list(keyboard.preset_keys)
+        if "preset_keys" in patch:
+            preset_keys = [str(key).strip().lower() for key in patch["preset_keys"]]
+
+        preset_hotkeys = dict(keyboard.preset_hotkeys)
+        if "preset_hotkeys" in patch:
+            preset_hotkeys = {
+                str(key).strip().lower(): str(token)
+                for key, token in dict(patch["preset_hotkeys"]).items()
+            }
+
+        conflict = _duplicate_keyboard_key(action_keys, preset_keys, preset_hotkeys)
+        if conflict:
+            return {
+                "ok": False,
+                "error": f"La tecla '{conflict}' ya está asignada a otra acción",
+            }
+
+        for field, value in action_keys.items():
+            setattr(keyboard, field, value)
+        keyboard.preset_keys = preset_keys
+        keyboard.preset_hotkeys = preset_hotkeys
+        if "backend" in patch:
+            keyboard.backend = str(patch["backend"])
+
+        self._settings.save(self._config_path)
+        return {"ok": True, "settings": self._settings.to_dict()}
 
     # -- Teclado (backend "window") ------------------------------------------
 
