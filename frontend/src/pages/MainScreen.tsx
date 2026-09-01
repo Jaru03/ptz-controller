@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CameraStatusPanel } from '@/components/camera/CameraStatusPanel'
 import { ConnectionDialog } from '@/components/connection/ConnectionDialog'
 import { SpeedControl } from '@/components/connection/SpeedControl'
@@ -64,6 +64,39 @@ export function MainScreen() {
   )
 }
 
+type InputSource = 'teclado' | 'mando'
+
+/**
+ * Última fuente de entrada detectada (teclado o mando), para mostrar
+ * siempre una única fila fija en vez de que el indicador entre y salga
+ * del DOM. Empieza en 'teclado' y solo cambia en el flanco de subida de
+ * cada fuente (el momento en que pasa a estar activa), así que si ambas
+ * están activas a la vez se queda con la que se detectó más
+ * recientemente.
+ */
+function useActiveInputSource(
+  keyboard: KeyboardInputState | null,
+  joystick: JoystickInputState | null,
+): InputSource {
+  const [source, setSource] = useState<InputSource>('teclado')
+  const wasKeyboardActive = useRef(false)
+  const wasJoystickActive = useRef(false)
+
+  useEffect(() => {
+    const keyboardActive = keyboard?.active ?? false
+    if (keyboardActive && !wasKeyboardActive.current) setSource('teclado')
+    wasKeyboardActive.current = keyboardActive
+  }, [keyboard])
+
+  useEffect(() => {
+    const joystickActive = joystick?.moving ?? false
+    if (joystickActive && !wasJoystickActive.current) setSource('mando')
+    wasJoystickActive.current = joystickActive
+  }, [joystick])
+
+  return source
+}
+
 function StatusSummary({
   status,
   keyboard,
@@ -73,12 +106,11 @@ function StatusSummary({
   keyboard: KeyboardInputState | null
   joystick: JoystickInputState | null
 }) {
-  // Solo se muestra mientras hay movimiento de verdad (tecla de
-  // movimiento pulsada / stick fuera de la zona muerta), no como
-  // indicador permanente de "hay un backend de teclado" o "hay un mando
-  // conectado".
-  const keyboardMoving = keyboard?.active ?? false
-  const joystickMoving = joystick?.moving ?? false
+  const source = useActiveInputSource(keyboard, joystick)
+  const inputValue =
+    source === 'teclado'
+      ? `Teclado${keyboard?.active ? ` (${keyboard.backend})` : ''}`
+      : `Mando${joystick?.name ? ` (${joystick.name})` : ''}`
 
   return (
     <div className="space-y-2 text-sm">
@@ -86,8 +118,7 @@ function StatusSummary({
       <dl className="space-y-1 text-muted-foreground">
         <Row label="Conectada" value={status?.connected ? 'Sí' : 'No'} />
         <Row label="Cámara" value={status?.device_name || '—'} />
-        {keyboardMoving && <Row label="Teclado" value={`Activo (${keyboard!.backend})`} />}
-        {joystickMoving && <Row label="Mando" value={joystick!.name} />}
+        <Row label="Entrada" value={inputValue} />
       </dl>
     </div>
   )

@@ -91,6 +91,7 @@ def test_apply_connection_settings_updates_camera(tmp_path) -> None:
             "port": 8081,
             "username": "operador",
             "password": "secreta",
+            "rtsp_url": " rtsp://cam/1 ",
             "mock": False,
         }
     )
@@ -100,6 +101,7 @@ def test_apply_connection_settings_updates_camera(tmp_path) -> None:
     assert settings.camera.port == 8081
     assert settings.camera.username == "operador"
     assert settings.camera.password == "secreta"
+    assert settings.camera.rtsp_url == "rtsp://cam/1"
     assert settings.camera.mock is False
 
 
@@ -110,6 +112,19 @@ def test_apply_connection_settings_ignores_missing_keys(tmp_path) -> None:
     api.apply_connection_settings({})
 
     assert settings.camera.ip == original_ip
+
+
+def test_apply_connection_settings_persists_to_config_path(tmp_path) -> None:
+    config_path = tmp_path / "config.yaml"
+    bus = EventBus()
+    settings = Settings.defaults()
+    api = Api(bus, settings, config_path)
+
+    api.apply_connection_settings({"ip": "10.0.0.9"})
+
+    assert config_path.is_file()
+    reloaded = Settings.load(config_path)
+    assert reloaded.camera.ip == "10.0.0.9"
 
 
 def test_get_settings_matches_settings_to_dict(tmp_path) -> None:
@@ -131,18 +146,24 @@ def test_save_settings_mutates_the_live_settings_object(tmp_path) -> None:
     api = Api(bus, settings, config_path)
 
     result = api.save_settings(
-        {
-            "camera": {"ip": " 10.0.0.9 ", "rtsp_url": " rtsp://cam/1 "},
-            "movement": {"speed": 0.8, "deadzone": 0.15, "zoom_mode": "step"},
-        }
+        {"movement": {"speed": 0.8, "deadzone": 0.15, "zoom_mode": "step"}}
     )
 
-    assert settings.camera.ip == "10.0.0.9"  # el mismo objeto, mutado
-    assert settings.camera.rtsp_url == "rtsp://cam/1"
     assert settings.movement.speed == 0.8
     assert settings.movement.deadzone == 0.15
     assert settings.movement.zoom_mode == "step"
     assert result == settings.to_dict()
+
+
+def test_save_settings_does_not_touch_camera(tmp_path) -> None:
+    """La identidad de la cámara solo se edita vía apply_connection_settings."""
+    api, settings, _sent = _api_with_bus(tmp_path)
+    original_ip = settings.camera.ip
+
+    api.save_settings({"camera": {"ip": "10.0.0.9"}, "movement": {"speed": 0.8}})
+
+    assert settings.camera.ip == original_ip
+    assert settings.movement.speed == 0.8
 
 
 def test_save_settings_persists_to_config_path(tmp_path) -> None:
@@ -151,11 +172,11 @@ def test_save_settings_persists_to_config_path(tmp_path) -> None:
     settings = Settings.defaults()
     api = Api(bus, settings, config_path)
 
-    api.save_settings({"camera": {"ip": "10.0.0.9"}})
+    api.save_settings({"movement": {"speed": 0.8}})
 
     assert config_path.is_file()
     reloaded = Settings.load(config_path)
-    assert reloaded.camera.ip == "10.0.0.9"
+    assert reloaded.movement.speed == 0.8
 
 
 def test_save_settings_ignores_missing_keys(tmp_path) -> None:
@@ -199,6 +220,64 @@ def test_discover_returns_empty_list_on_error(monkeypatch, tmp_path) -> None:
     api, _settings, _sent = _api_with_bus(tmp_path)
 
     assert api.discover() == []
+
+
+def test_save_keyboard_settings_mutates_the_live_settings_object(tmp_path) -> None:
+    config_path = tmp_path / "config.yaml"
+    bus = EventBus()
+    settings = Settings.defaults()
+    api = Api(bus, settings, config_path)
+
+    result = api.save_keyboard_settings({"up": "I", "zoom_in": "O", "backend": "window"})
+
+    assert result["ok"] is True
+    assert settings.keyboard.up == "i"  # normalizada a minúscula
+    assert settings.keyboard.zoom_in == "o"
+    assert settings.keyboard.backend == "window"
+    assert result["settings"] == settings.to_dict()
+
+
+def test_save_keyboard_settings_persists_to_config_path(tmp_path) -> None:
+    config_path = tmp_path / "config.yaml"
+    bus = EventBus()
+    settings = Settings.defaults()
+    api = Api(bus, settings, config_path)
+
+    api.save_keyboard_settings({"up": "i"})
+
+    assert config_path.is_file()
+    reloaded = Settings.load(config_path)
+    assert reloaded.keyboard.up == "i"
+
+
+def test_save_keyboard_settings_rejects_duplicate_key(tmp_path) -> None:
+    api, settings, _sent = _api_with_bus(tmp_path)
+    original_down = settings.keyboard.down
+
+    result = api.save_keyboard_settings({"up": settings.keyboard.down})
+
+    assert result["ok"] is False
+    assert "down" not in result.get("error", "")  # el mensaje nombra la tecla, no el campo
+    assert settings.keyboard.up != settings.keyboard.down
+    assert settings.keyboard.down == original_down
+
+
+def test_save_keyboard_settings_rejects_key_colliding_with_preset(tmp_path) -> None:
+    api, settings, _sent = _api_with_bus(tmp_path)
+
+    result = api.save_keyboard_settings({"stop": settings.keyboard.preset_keys[0]})
+
+    assert result["ok"] is False
+    assert settings.keyboard.stop == "space"
+
+
+def test_save_keyboard_settings_rejects_blank_action_key(tmp_path) -> None:
+    api, settings, _sent = _api_with_bus(tmp_path)
+
+    result = api.save_keyboard_settings({"quit": "  "})
+
+    assert result["ok"] is False
+    assert settings.keyboard.quit == "esc"
 
 
 def test_get_controls_info_returns_keyboard_and_joystick(tmp_path) -> None:

@@ -8,6 +8,8 @@ import type {
   CameraSettings,
   ControlsInfo,
   DiscoveredDevice,
+  KeyboardConfig,
+  KeyboardSettingsResult,
   MovementSettings,
   UpdateResult,
 } from './types'
@@ -36,14 +38,14 @@ export const api = {
   removePreset: (token: string) => call((a) => a.remove_preset(token)),
   setSpeed: (speed: number) => call((a) => a.set_speed(speed)),
   getSettings: (): Promise<AppSettings> => call((a) => a.get_settings()),
-  saveSettings: (patch: {
-    camera?: Partial<CameraSettings>
-    movement?: Partial<MovementSettings>
-  }): Promise<AppSettings> => call((a) => a.save_settings(patch)),
+  saveSettings: (patch: { movement: Partial<MovementSettings> }): Promise<AppSettings> =>
+    call((a) => a.save_settings(patch)),
   keyboardRequiresWindowEvents: (): Promise<boolean> => call((a) => a.keyboard_requires_window_events()),
   keyDown: (name: string) => call((a) => a.key_down(name)),
   keyUp: (name: string) => call((a) => a.key_up(name)),
   getControlsInfo: (): Promise<ControlsInfo> => call((a) => a.get_controls_info()),
+  saveKeyboardSettings: (patch: Partial<KeyboardConfig>): Promise<KeyboardSettingsResult> =>
+    call((a) => a.save_keyboard_settings(patch)),
   getVersion: (): Promise<string> => call((a) => a.get_version()),
   checkForUpdates: (): Promise<UpdateResult> => call((a) => a.check_for_updates()),
   openReleasesPage: () => call((a) => a.open_releases_page()),

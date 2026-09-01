@@ -1,4 +1,12 @@
-import type { AppSettings, CameraSettings, ControlsInfo, DiscoveredDevice, UpdateResult } from './types'
+import type {
+  AppSettings,
+  CameraSettings,
+  ControlsInfo,
+  DiscoveredDevice,
+  KeyboardConfig,
+  KeyboardSettingsResult,
+  UpdateResult,
+} from './types'
 
 /**
  * pywebview inyecta `window.pywebview.api` de forma asíncrona (tras
@@ -25,13 +33,15 @@ declare global {
         set_speed(speed: number): Promise<{ ok: boolean }>
         get_settings(): Promise<AppSettings>
         save_settings(patch: {
-          camera?: Partial<CameraSettings>
-          movement?: Partial<import('./types').MovementSettings>
+          movement: Partial<import('./types').MovementSettings>
         }): Promise<AppSettings>
         keyboard_requires_window_events(): Promise<boolean>
         key_down(name: string): Promise<void>
         key_up(name: string): Promise<void>
         get_controls_info(): Promise<ControlsInfo>
+        save_keyboard_settings(
+          patch: Partial<KeyboardConfig>,
+        ): Promise<KeyboardSettingsResult>
         get_version(): Promise<string>
         check_for_updates(): Promise<UpdateResult>
         open_releases_page(): Promise<{ ok: boolean }>

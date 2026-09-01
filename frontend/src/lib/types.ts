@@ -107,6 +107,13 @@ export interface ControlsInfo {
   joystick: JoystickConfig
 }
 
+/** Resultado de Api.save_keyboard_settings() (gui_web/api.py). */
+export interface KeyboardSettingsResult {
+  ok: boolean
+  error?: string
+  settings?: { keyboard: KeyboardConfig }
+}
+
 /** Payload de Api.check_for_updates() (models/version.py::UpdateResult). */
 export interface UpdateResult {
   ok: boolean

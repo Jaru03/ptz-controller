@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -20,32 +19,33 @@ const ZOOM_MODE_LABELS: Record<AppSettings['movement']['zoom_mode'], string> = {
   auto: 'Automático (a saltos, y si falla con error, continuo)',
 }
 
-/** Equivalente a gui/settings_dialog.py::SettingsDialog. */
+/**
+ * Equivalente a gui/settings_dialog.py::SettingsDialog: solo comportamiento
+ * de movimiento (velocidad, zona muerta, modo de zoom). La identidad de la
+ * cámara (IP, credenciales, RTSP, mock) vive únicamente en
+ * ConnectionDialog, para no repetir el mismo formulario en dos diálogos.
+ */
 export function SettingsDialog() {
   const [open, setOpen] = useState(false)
-  const [settings, setSettings] = useState<AppSettings | null>(null)
+  const [movement, setMovement] = useState<AppSettings['movement'] | null>(null)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    if (open) api.getSettings().then(setSettings)
+    if (open) api.getSettings().then((settings) => setMovement(settings.movement))
   }, [open])
-
-  function updateCamera<K extends keyof AppSettings['camera']>(key: K, value: AppSettings['camera'][K]) {
-    setSettings((prev) => (prev ? { ...prev, camera: { ...prev.camera, [key]: value } } : prev))
-  }
 
   function updateMovement<K extends keyof AppSettings['movement']>(
     key: K,
     value: AppSettings['movement'][K],
   ) {
-    setSettings((prev) => (prev ? { ...prev, movement: { ...prev.movement, [key]: value } } : prev))
+    setMovement((prev) => (prev ? { ...prev, [key]: value } : prev))
   }
 
   async function handleSave() {
-    if (!settings) return
+    if (!movement) return
     setSaving(true)
     try {
-      await api.saveSettings({ camera: settings.camera, movement: settings.movement })
+      await api.saveSettings({ movement })
       setOpen(false)
     } finally {
       setSaving(false)
@@ -63,55 +63,11 @@ export function SettingsDialog() {
         <DialogHeader>
           <DialogTitle>Configuración</DialogTitle>
         </DialogHeader>
-        {settings && (
+        {movement && (
           // min-w-0: DialogContent es un grid y, sin esto, un hijo con
           // contenido intrínsecamente ancho (aunque envuelva bien)
           // puede "reventar" la pista del grid más allá de max-w-md.
           <div className="min-w-0 space-y-3">
-            <div className="space-y-1.5">
-              <Label>IP de la cámara</Label>
-              <Input value={settings.camera.ip} onChange={(e) => updateCamera('ip', e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Puerto</Label>
-              <Input
-                type="number"
-                min={1}
-                max={65535}
-                value={settings.camera.port}
-                onChange={(e) => updateCamera('port', Number(e.target.value) || 0)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Usuario</Label>
-              <Input value={settings.camera.username} onChange={(e) => updateCamera('username', e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Contraseña</Label>
-              <Input
-                type="password"
-                value={settings.camera.password}
-                onChange={(e) => updateCamera('password', e.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>URL RTSP</Label>
-              <Input
-                value={settings.camera.rtsp_url}
-                onChange={(e) => updateCamera('rtsp_url', e.target.value)}
-                placeholder="Automática vía ONVIF si se deja vacío"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="settings-mock"
-                checked={settings.camera.mock}
-                onCheckedChange={(checked) => updateCamera('mock', checked === true)}
-              />
-              <Label htmlFor="settings-mock" className="font-normal">
-                Usar cámara simulada (Mock)
-              </Label>
-            </div>
             <div className="space-y-1.5">
               <Label>Velocidad</Label>
               <Input
@@ -119,7 +75,7 @@ export function SettingsDialog() {
                 min={0}
                 max={1}
                 step={0.05}
-                value={settings.movement.speed}
+                value={movement.speed}
                 onChange={(e) => updateMovement('speed', Number(e.target.value))}
               />
             </div>
@@ -130,14 +86,14 @@ export function SettingsDialog() {
                 min={0}
                 max={0.5}
                 step={0.01}
-                value={settings.movement.deadzone}
+                value={movement.deadzone}
                 onChange={(e) => updateMovement('deadzone', Number(e.target.value))}
               />
             </div>
             <div className="space-y-1.5">
               <Label>Modo de zoom</Label>
               <Select
-                value={settings.movement.zoom_mode}
+                value={movement.zoom_mode}
                 onValueChange={(value) =>
                   updateMovement('zoom_mode', value as AppSettings['movement']['zoom_mode'])
                 }
@@ -167,7 +123,7 @@ export function SettingsDialog() {
           <Button variant="ghost" onClick={() => setOpen(false)}>
             Cancelar
           </Button>
-          <Button onClick={handleSave} disabled={!settings || saving}>
+          <Button onClick={handleSave} disabled={!movement || saving}>
             {saving ? 'Guardando…' : 'Guardar'}
           </Button>
         </div>

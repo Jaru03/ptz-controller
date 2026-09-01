@@ -20,6 +20,12 @@ import type { CameraSettings, PtzStatus } from '@/lib/types'
  * IP/usuario/contraseña dos veces —aquí y en ConnectionScreen al
  * arrancar— quedaba repetitivo. El estado de conexión en sí sigue
  * visible permanentemente en el resumen "Estado" de MainScreen.
+ *
+ * Única fuente de verdad para la identidad de la cámara (IP, puerto,
+ * credenciales, RTSP, mock): se guarda con
+ * ``Api.apply_connection_settings``, que persiste a config.yaml.
+ * SettingsDialog no repite estos campos, solo edita el comportamiento
+ * de movimiento — ver su propio docstring.
  */
 export function ConnectionDialog() {
   const [open, setOpen] = useState(false)
@@ -103,6 +109,15 @@ export function ConnectionDialog() {
                 type="password"
                 value={camera.password}
                 onChange={(e) => update('password', e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="conn-rtsp">URL RTSP</Label>
+              <Input
+                id="conn-rtsp"
+                value={camera.rtsp_url}
+                onChange={(e) => update('rtsp_url', e.target.value)}
+                placeholder="Automática vía ONVIF si se deja vacío"
               />
             </div>
             <div className="flex items-center gap-2">
