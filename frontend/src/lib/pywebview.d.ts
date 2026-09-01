@@ -33,8 +33,7 @@ declare global {
         set_speed(speed: number): Promise<{ ok: boolean }>
         get_settings(): Promise<AppSettings>
         save_settings(patch: {
-          camera?: Partial<CameraSettings>
-          movement?: Partial<import('./types').MovementSettings>
+          movement: Partial<import('./types').MovementSettings>
         }): Promise<AppSettings>
         keyboard_requires_window_events(): Promise<boolean>
         key_down(name: string): Promise<void>
