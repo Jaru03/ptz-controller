@@ -72,6 +72,11 @@ class PresetRegistry:
                 return self._tokens[index]
         return None
 
+    def contains(self, token: str) -> bool:
+        """Indica si existe un preset con ese token exacto."""
+        with self._lock:
+            return token in self._tokens
+
     @property
     def tokens(self) -> list[str]:
         with self._lock:

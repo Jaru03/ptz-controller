@@ -131,14 +131,18 @@ desde el código a partir de los valores por defecto.
 | ESC | Salir |
 
 Solo se envían comandos a la cámara cuando la dirección cambia. Las teclas
-de escena se asignan **por posición** a los presets que devuelve la cámara
-(`config.yaml` → `keyboard.preset_keys`), así que funcionan con cualquier
-token ONVIF, incluidos los que no son números, y no hay que tocar nada al
-añadir escenas. Para fijar una tecla a un token concreto está
-`keyboard.preset_hotkeys` (p. ej. `f1: PresetEntrada`), que tiene
-prioridad. La lista de presets de la interfaz muestra el token y la tecla
-de cada escena. La velocidad se ajusta con el deslizador de la interfaz o
-con el mando.
+de escena (`config.yaml` → `keyboard.preset_keys`) se resuelven en este
+orden: primero un atajo explícito en `keyboard.preset_hotkeys` (p. ej.
+`f1: PresetEntrada`); si no hay, se prueba si existe un preset cuyo
+**token coincida exactamente con la tecla** (p. ej. tecla `3` -> preset de
+token `"3"`), así la tecla llama siempre al mismo número de escena sea
+cual sea su posición en la lista que devuelva la cámara; y solo si
+tampoco hay token igual a la tecla, se usa la asignación **por
+posición** (1ª tecla -> 1er preset), necesaria para tokens no numéricos
+('PresetA', UUIDs...) que nunca podrían coincidir por igualdad. No hay
+que tocar nada al añadir escenas. La lista de presets de la interfaz
+muestra el token y la tecla de cada escena. La velocidad se ajusta con
+el deslizador de la interfaz o con el mando.
 
 El zoom se controla con `movement.zoom_mode`: `step` (por defecto vía
 `auto`) avanza a saltos de `movement.zoom_step` con `RelativeMove`, de
@@ -226,9 +230,11 @@ reenvía los eventos de estado al frontend (React) vía pywebview.
   dependencias adicionales).
 - **`controllers/base.py`** — `MovementState` (zona muerta re-escalada,
   emisión solo ante cambios de dirección y reenvío periódico) y
-  `PresetRegistry` (posición → token ONVIF), usados por teclado y mando.
+  `PresetRegistry` (posición/coincidencia exacta → token ONVIF), usados
+  por teclado y mando.
 - **`controllers/keyboard_controller.py`** — Backends pynput/ventana con
-  la misma lógica.
+  la misma lógica; resuelve la tecla de cada escena por atajo explícito,
+  token exacto y posición, en ese orden (ver `_preset_token_for_key`).
 - **`controllers/pygame_events.py`** — Bucle de eventos SDL compartido
   (driver dummy) con hotplug de mandos.
 - **`controllers/joystick_controller.py`** — Movimiento proporcional por

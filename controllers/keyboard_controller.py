@@ -58,12 +58,16 @@ def hotkey_for_preset(
 ) -> str:
     """Tecla asignada al preset en la posición ``index`` (o cadena vacía).
 
-    Tiene prioridad un atajo explícito al token; si no lo hay, se usa la
-    asignación posicional de ``preset_keys``.
+    Misma prioridad que ``KeyboardController._preset_token_for_key``:
+    atajo explícito, luego coincidencia exacta tecla/token, y solo si
+    ninguna de las dos aplica, la asignación posicional de
+    ``preset_keys``.
     """
     for key, mapped in config.preset_hotkeys.items():
         if mapped == token:
             return key
+    if token in config.preset_keys:
+        return token
     if 0 <= index < len(config.preset_keys):
         return config.preset_keys[index]
     return ""
@@ -195,9 +199,17 @@ class KeyboardController(InputController):
     def _preset_token_for_key(self, key_name: str) -> str | None:
         """Traduce una tecla al token ONVIF del preset correspondiente.
 
-        Un atajo explícito ``preset_hotkeys`` gana; si no, la tecla se
-        resuelve por su posición en ``preset_keys`` contra la lista de
-        presets que la cámara haya publicado.
+        Orden de prioridad:
+          1. Atajo explícito (``preset_hotkeys``): tecla -> token fijo.
+          2. Coincidencia exacta: si existe un preset cuyo token es
+             igual a la tecla (p. ej. tecla '3' y token '3'), se usa ese
+             directamente — así la tecla llama siempre al mismo número
+             de escena, sea cual sea su posición en la lista que
+             devuelva la cámara.
+          3. Posición en ``preset_keys`` contra la lista de presets
+             (comportamiento original): necesario para tokens no
+             numéricos ('PresetA', UUIDs...), que nunca podrían
+             coincidir con una tecla por igualdad.
         """
         config = self._config
         aliases = key_aliases(key_name)
@@ -207,6 +219,8 @@ class KeyboardController(InputController):
                 return token
         for alias in aliases:
             if alias in config.preset_keys:
+                if self._presets.contains(alias):
+                    return alias
                 return self._presets.token_at(config.preset_keys.index(alias))
         return None
 

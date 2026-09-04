@@ -150,6 +150,24 @@ def test_number_key_reaches_the_scene_in_that_position() -> None:
         worker.stop()
 
 
+def test_number_key_prefers_exact_token_match_over_position() -> None:
+    # El token "4" existe pero no ocupa la 4ª posición de la lista (los
+    # tokens numéricos se ordenan antes que los no numéricos): si la
+    # tecla "4" se resolviera solo por posición llamaría a "gamma", no a
+    # la escena "4" que el usuario espera al pulsar esa tecla.
+    pans = {"zeta": 0.1, "alpha": 0.2, "beta": 0.3, "4": 0.9, "gamma": 0.5}
+    mock = _mock_with_scenes(pans)
+    assert [p.token for p in mock.list_presets()] == ["4", "alpha", "beta", "gamma", "zeta"]
+
+    bus, worker, keyboard = _wire_app(mock)
+    try:
+        keyboard.on_key_down("4")
+        time.sleep(0.2)
+        assert round(mock.get_status().pan, 6) == 0.9
+    finally:
+        worker.stop()
+
+
 def test_numpad_key_reaches_the_scene_in_that_position() -> None:
     pans = {"escena-a": 0.5, "escena-b": 0.7}
     mock = _mock_with_scenes(pans)

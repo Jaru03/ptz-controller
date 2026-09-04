@@ -271,6 +271,14 @@ def test_hotkey_for_preset_uses_position_and_explicit_map() -> None:
     assert hotkey_for_preset(config, 12, "PresetM") == "f1"
 
 
+def test_hotkey_for_preset_prefers_exact_token_match_over_position() -> None:
+    # El token "7" es en sí una tecla válida de preset_keys: debe ganar a
+    # la posición, aunque esa posición (5, o sea "6") corresponda a otra
+    # tecla distinta.
+    config = KeyboardConfig()
+    assert hotkey_for_preset(config, 5, "7") == "7"
+
+
 def test_create_keyboard_controller_prefers_window_on_wayland(
     monkeypatch,
 ) -> None:
